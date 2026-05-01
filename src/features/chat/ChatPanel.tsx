@@ -27,6 +27,7 @@ export function ChatPanel() {
   const addNode = useStore((s) => s.addNode);
   const setActive = useStore((s) => s.setActiveConversation);
   const createConversation = useStore((s) => s.createConversation);
+  const setGraphImportOpen = useStore((s) => s.setGraphImportOpen);
 
   async function runSummarize() {
     if (!conversationId) return;
@@ -73,6 +74,9 @@ export function ChatPanel() {
       }
       case 'clear':
         // Already handled in MessageInput (it clears on send), no-op here.
+        break;
+      case 'import-graph':
+        setGraphImportOpen(true);
         break;
     }
   }

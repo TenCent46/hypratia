@@ -9,7 +9,10 @@ import {
   normalizeFilename,
   textMimeForExtension,
 } from './filenames';
-import { mirrorSidecar, mirrorTextArtifact } from './knowledgeBaseMirror';
+import {
+  mirrorTextArtifactLegacy,
+  resolveProjectRawPath,
+} from './knowledgeBaseMirror';
 import type {
   ArtifactProvider,
   ArtifactProviderId,
@@ -136,10 +139,23 @@ export class ArtifactService {
     }
     const mimeType = req.mimeType ?? textMimeForExtension(extension);
     const bytes = new TextEncoder().encode(req.textContent);
+    // Auto-name text artifacts from their content. Source order:
+    //   1. explicit `title` on the request
+    //   2. YAML `title:` in frontmatter
+    //   3. first H1 heading
+    //   4. first non-empty meaningful line (clipped)
+    // Falls back to the original filename when none of those produce
+    // anything usable (extension is preserved in every case).
+    const finalFilename = retitleTextArtifact({
+      originalFilename: filename,
+      extension,
+      explicitTitle: req.title,
+      content: req.textContent,
+    });
     return await this.commit({
       bytes,
       mimeType,
-      filename,
+      filename: finalFilename,
       extension,
       provider: 'host-text',
       kind: 'text',
@@ -412,6 +428,10 @@ export class ArtifactService {
       bytes: args.bytes,
       suggestedName: args.filename,
       mimeType: args.mimeType,
+      // Pass the conversation through so the raw-attachment mirror routes
+      // the file into [project]/raw/ (or default/raw/) instead of falling
+      // back to settings.lastConversationId.
+      conversationId: args.conversationId,
     });
     const store = useStore.getState();
     store.addAttachment(att);
@@ -441,13 +461,25 @@ export class ArtifactService {
     let knowledgeBasePath: string | undefined;
     if (args.saveToKnowledgeBase) {
       try {
+        // The raw bytes are already mirrored into `[project]/raw/<file>` by
+        // the attachment ingest path (see TauriAttachmentService). We just
+        // record the resolved path here so the chat artifact card can show
+        // "saved to <path>" without re-writing the file.
+        knowledgeBasePath = await resolveProjectRawPath({
+          conversationId: args.conversationId,
+          filename: args.filename,
+        });
         if (
+          !knowledgeBasePath &&
           args.kind === 'text' &&
           (args.extension === 'md' ||
             args.extension === 'markdown' ||
             args.extension === 'mdx')
         ) {
-          knowledgeBasePath = await mirrorTextArtifact({
+          // Incognito (or other reasons we couldn't route to a project)
+          // still needs the markdown body somewhere readable. Fall back
+          // to the legacy `Artifacts/YYYY-MM/...` sidecar with frontmatter.
+          knowledgeBasePath = await mirrorTextArtifactLegacy({
             filename: args.filename,
             content: args.textContentForCanvas ?? '',
             artifactId: att.id,
@@ -455,20 +487,6 @@ export class ArtifactService {
             conversationId: args.conversationId,
             sourceMessageId: args.sourceMessageId,
             title: args.title,
-            createdAt,
-          });
-        } else if (args.kind !== 'text') {
-          knowledgeBasePath = await mirrorSidecar({
-            basename: stripExt(args.filename),
-            artifactId: att.id,
-            artifactKind: args.kind,
-            extension: args.extension,
-            attachmentRelPath: att.relPath,
-            provider: args.provider,
-            conversationId: args.conversationId,
-            sourceMessageId: args.sourceMessageId,
-            title: args.title,
-            sizeBytes: args.bytes.byteLength,
             createdAt,
           });
         }
@@ -524,9 +542,66 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function stripExt(name: string): string {
-  const i = name.lastIndexOf('.');
-  return i < 0 ? name : name.slice(0, i);
+/**
+ * Derive a meaningful filename for a text artifact from its content.
+ * Order: explicit title → frontmatter `title:` → first `# H1` →
+ * first non-empty line. Always preserves the original extension. When
+ * nothing meaningful can be extracted, returns the original filename.
+ */
+function retitleTextArtifact(args: {
+  originalFilename: string;
+  extension: string;
+  explicitTitle?: string;
+  content: string;
+}): string {
+  const stem = pickStemFromContent(args);
+  if (!stem) return args.originalFilename;
+  const safe = sanitizeFilenameStem(stem);
+  if (!safe) return args.originalFilename;
+  return `${safe}.${args.extension}`;
+}
+
+function pickStemFromContent(args: {
+  explicitTitle?: string;
+  content: string;
+}): string | null {
+  const explicit = args.explicitTitle?.trim();
+  if (explicit && explicit.length > 0 && explicit.length <= 120) return explicit;
+  const fmMatch = args.content.match(/^---\n([\s\S]*?)\n---/);
+  if (fmMatch) {
+    const titleLine = fmMatch[1].match(/^title:\s*(.+)$/m);
+    if (titleLine) {
+      const t = titleLine[1].replace(/^["']|["']$/g, '').trim();
+      if (t.length > 0 && t.length <= 120) return t;
+    }
+  }
+  const body = fmMatch
+    ? args.content.slice(fmMatch[0].length)
+    : args.content;
+  for (const line of body.split('\n')) {
+    const h1 = line.match(/^#\s+(.+)$/);
+    if (h1) {
+      const t = h1[1].trim();
+      if (t.length > 0 && t.length <= 120) return t;
+    }
+  }
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim().replace(/^[#>*\-_+\s]+/, '').trim();
+    if (trimmed.length >= 3) return trimmed.slice(0, 80);
+  }
+  return null;
+}
+
+function sanitizeFilenameStem(value: string): string {
+  // Replace separators and reserved chars with `-`, collapse whitespace,
+  // strip surrounding dots/dashes, cap length so the result still fits a
+  // sensible filename across macOS/Windows.
+  const cleaned = value
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\-\s]+|[.\-\s]+$/g, '')
+    .trim();
+  return cleaned.slice(0, 80);
 }
 
 function errorOf(err: unknown): ArtifactResultErr {

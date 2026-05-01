@@ -1,13 +1,15 @@
 import type { Attachment } from '../../types';
 
 export type IngestSource =
-  | { kind: 'path'; path: string; suggestedName?: string }
-  | {
-      kind: 'bytes';
-      bytes: Uint8Array;
-      suggestedName: string;
-      mimeType: string;
-    };
+  (
+    | { kind: 'path'; path: string; suggestedName?: string }
+    | {
+        kind: 'bytes';
+        bytes: Uint8Array;
+        suggestedName: string;
+        mimeType: string;
+      }
+  ) & { conversationId?: string };
 
 export interface AttachmentService {
   ingest(source: IngestSource): Promise<Attachment>;

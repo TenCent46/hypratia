@@ -1,19 +1,21 @@
 import {
-  useEffect,
   useImperativeHandle,
   useLayoutEffect,
-  useMemo,
   useRef,
   type ForwardedRef,
   forwardRef,
 } from 'react';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, drawSelection, highlightActiveLine } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { searchKeymap, search } from '@codemirror/search';
 import { foldGutter, foldKeymap, indentOnInput } from '@codemirror/language';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import {
+  markdown,
+  markdownKeymap,
+  markdownLanguage,
+} from '@codemirror/lang-markdown';
 import { smartWrapInputHandler, wrapKeymap } from './extensions/smartWrap';
 import {
   wikilinkCompletionSource,
@@ -23,8 +25,13 @@ import {
   preloadKbFiles,
 } from './extensions/wikilink';
 import { frontmatterFold } from './extensions/frontmatterFold';
+import { markdownLinkClick } from './extensions/markdownLinkClick';
 import { kbThemeExtension } from './extensions/theme';
-import { livePreviewMarkerFold } from './extensions/livePreviewDecorations';
+import {
+  livePreviewMarkerFold,
+  livePreviewWidgets,
+} from './extensions/livePreviewDecorations';
+import { autoLinkifyUrls, pasteLinkOverSelection } from './extensions/autoLink';
 import { slashCommandCompletionSource } from './extensions/slashCommands';
 import { attachmentDrop } from './extensions/attachmentDrop';
 import {
@@ -46,36 +53,28 @@ type Props = {
   initialDoc: string;
   filePath: string;
   rootPath: string;
-  mode: 'live-preview' | 'source';
   onChange: (doc: string) => void;
   onSave: () => void;
   onContextMenu: (e: MouseEvent) => void;
 };
 
 function MarkdownEditorViewImpl(
-  { initialDoc, filePath, rootPath, mode, onChange, onSave, onContextMenu }: Props,
+  { initialDoc, filePath, rootPath, onChange, onSave, onContextMenu }: Props,
   ref: ForwardedRef<MarkdownEditorViewHandle>,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const themeCompartment = useMemo(() => new Compartment(), []);
   const docTagsRef = useRef<string[]>([]);
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const onContextMenuRef = useRef(onContextMenu);
   const initialDocRef = useRef(initialDoc);
-  const modeRef = useRef(mode);
 
-  // Keep refs current so the long-lived CM6 instance always calls the
-  // latest React handlers without rebuilding the view on every render.
-  // Done inside an effect because React's rules forbid touching refs
-  // during render.
   useLayoutEffect(() => {
     onChangeRef.current = onChange;
     onSaveRef.current = onSave;
     onContextMenuRef.current = onContextMenu;
     initialDocRef.current = initialDoc;
-    modeRef.current = mode;
   });
 
   useLayoutEffect(() => {
@@ -108,9 +107,12 @@ function MarkdownEditorViewImpl(
             codeLanguages: () => null,
             addKeymap: false,
           }),
-          themeCompartment.of(kbThemeExtension(mode)),
+          kbThemeExtension(),
           smartWrapInputHandler(),
+          autoLinkifyUrls(),
+          pasteLinkOverSelection(),
           wikilinkDecorations(() => rootPath),
+          markdownLinkClick(() => rootPath, () => filePath),
           autocompletion({
             override: [
               wikilinkCompletionSource(rootPath),
@@ -121,12 +123,14 @@ function MarkdownEditorViewImpl(
             activateOnTyping: true,
           }),
           attachmentDrop(),
-          livePreviewMarkerFold(() => modeRef.current === 'live-preview'),
+          livePreviewMarkerFold(() => true),
+          livePreviewWidgets(() => rootPath, () => filePath),
           frontmatterFold(),
           ...pluginExtensions(),
           keymap.of([
             saveBinding,
             ...wrapKeymap(),
+            ...markdownKeymap,
             ...defaultKeymap,
             ...historyKeymap,
             ...searchKeymap,
@@ -162,17 +166,7 @@ function MarkdownEditorViewImpl(
     };
     // We deliberately rebuild the editor when the file path or root changes:
     // the initial document and wikilink closures are baked into the CM state.
-    // Mode swaps happen via the compartment effect below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootPath, filePath]);
-
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    view.dispatch({
-      effects: themeCompartment.reconfigure(kbThemeExtension(mode)),
-    });
-  }, [mode, themeCompartment]);
 
   useImperativeHandle(
     ref,

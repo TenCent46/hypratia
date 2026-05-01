@@ -1,17 +1,23 @@
 import { useState, type MouseEvent } from 'react';
 import { ChatPanel } from '../../features/chat/ChatPanel';
 import { ChatPanelContextMenu } from '../ChatPanel/ChatPanelContextMenu';
+import type { PaneMenuControl } from '../PanesContextMenu/PanesContextMenu';
 
+/**
+ * Right-pane shell. Detach + hide are intentionally not exposed as inline
+ * UI buttons here — they were colliding with the chat tab strip's "+" /
+ * tab close glyphs. Hide remains reachable via the right-click menu and
+ * the Panes submenu; detach is reachable from the command palette
+ * (`Cmd-K` → "Detach Chat to Window") and the macOS File menu.
+ */
 export function RightPane({
-  onClose,
-  onDetach,
   panelState,
+  paneMenuItems,
   onShow,
   onHide,
 }: {
-  onClose?: () => void;
-  onDetach?: () => void;
   panelState?: 'shown' | 'hidden';
+  paneMenuItems?: PaneMenuControl[];
   onShow?: () => void;
   onHide?: () => void;
 }) {
@@ -33,32 +39,6 @@ export function RightPane({
 
   return (
     <aside className="right-pane chat-only" onContextMenu={onContextMenu}>
-      {onDetach || onClose ? (
-        <div className="right-pane-controls">
-          {onDetach ? (
-            <button
-              type="button"
-              className="pane-close"
-              onClick={onDetach}
-              aria-label="Open right pane in window"
-              title="Open right pane in window"
-            >
-              ⧉
-            </button>
-          ) : null}
-          {onClose ? (
-            <button
-              type="button"
-              className="pane-close"
-              onClick={onClose}
-              aria-label="Hide right pane"
-              title="Hide right pane"
-            >
-              ×
-            </button>
-          ) : null}
-        </div>
-      ) : null}
       <div className="right-body">
         <ChatPanel />
       </div>
@@ -67,6 +47,7 @@ export function RightPane({
           x={menu.x}
           y={menu.y}
           panelState={panelState}
+          paneMenuItems={paneMenuItems}
           onShow={onShow}
           onHide={onHide}
           onClose={() => setMenu(null)}

@@ -7,8 +7,11 @@ import { obsidianExporter } from '../../services/export/ObsidianExporter';
 import { openTodayDailyNote } from '../daily/DailyNotes';
 import { confirmDangerTwice } from '../../lib/confirm';
 import { getCurrentEditor } from '../../features/knowledge/editor/editorRegistry';
+import {
+  resetAllKnowledgeBase,
+  resetProjectKnowledgeBase,
+} from '../../services/knowledge/resetKnowledgeBase';
 import type { Command } from './CommandRegistry';
-import type { EditorMode } from '../../types';
 
 export function useCommands(): Command[] {
   const setCommandOpen = useStore((s) => s.setCommandOpen);
@@ -26,6 +29,17 @@ export function useCommands(): Command[] {
   const viewMode = useStore((s) => s.ui.viewMode);
   const canvasTool = useStore((s) => s.ui.canvasTool);
   const setCanvasTool = useStore((s) => s.setCanvasTool);
+  const canvasWheelMode = useStore(
+    (s) => s.settings.canvasWheelMode ?? 'pan',
+  );
+  const setCanvasWheelMode = useStore((s) => s.setCanvasWheelMode);
+  const incognitoUnprojectedChats = useStore(
+    (s) => s.settings.incognitoUnprojectedChats ?? false,
+  );
+  const setIncognitoUnprojectedChats = useStore(
+    (s) => s.setIncognitoUnprojectedChats,
+  );
+  const setGraphImportOpen = useStore((s) => s.setGraphImportOpen);
   const activeRightTab = useStore((s) => s.ui.activeRightTab);
   const setActiveRightTab = useStore((s) => s.setActiveRightTab);
   const setTheme = useStore((s) => s.setTheme);
@@ -39,12 +53,6 @@ export function useCommands(): Command[] {
   return useMemo<Command[]>(() => {
     function dispatchLayoutAction(action: string) {
       window.dispatchEvent(new CustomEvent('mc:layout-action', { detail: { action } }));
-    }
-
-    function dispatchEditorMode(mode: EditorMode) {
-      window.dispatchEvent(
-        new CustomEvent('mc:editor-toggle-mode', { detail: { mode } }),
-      );
     }
 
     function nextConversation(direction: 1 | -1) {
@@ -180,6 +188,24 @@ export function useCommands(): Command[] {
         run: () => setCanvasTool('hand'),
       },
       {
+        id: 'canvas.wheel.toggle',
+        title:
+          canvasWheelMode === 'pan'
+            ? 'Wheel: switch to Zoom mode'
+            : 'Wheel: switch to Scroll/Pan mode',
+        section: 'Canvas',
+        shortcut: 'S',
+        match: 's',
+        run: () =>
+          setCanvasWheelMode(canvasWheelMode === 'pan' ? 'zoom' : 'pan'),
+      },
+      {
+        id: 'canvas.import-graph',
+        title: 'Import to map…',
+        section: 'Canvas',
+        run: () => setGraphImportOpen(true),
+      },
+      {
         id: 'ai.palette',
         title: 'Open AI palette on selection',
         section: 'AI',
@@ -241,6 +267,18 @@ export function useCommands(): Command[] {
         title: 'Hide Canvas',
         section: 'View',
         run: () => dispatchLayoutAction('hide-canvas'),
+      },
+      {
+        id: 'detach-chat',
+        title: 'Detach Chat to New Window',
+        section: 'View',
+        run: () => dispatchLayoutAction('open-chat-window'),
+      },
+      {
+        id: 'detach-canvas',
+        title: 'Detach Canvas to New Window',
+        section: 'View',
+        run: () => dispatchLayoutAction('open-canvas-window'),
       },
       {
         id: 'toggle-markdown',
@@ -356,6 +394,108 @@ export function useCommands(): Command[] {
         },
       },
       {
+        id: 'file.toggle-incognito-unprojected',
+        title: incognitoUnprojectedChats
+          ? 'Incognito: save unprojected chats to Knowledge Base'
+          : 'Incognito: stop saving unprojected chats to Knowledge Base',
+        section: 'File',
+        run: () => setIncognitoUnprojectedChats(!incognitoUnprojectedChats),
+      },
+      {
+        id: 'file.reset-knowledge-base',
+        title: 'Reset Knowledge Base (rebuild from chats)',
+        section: 'File',
+        run: async () => {
+          if (
+            !confirmDangerTwice({
+              title: 'Reset the entire Knowledge Base?',
+              detail:
+                'This deletes every Markdown file under `default/` and `projects/` in the working folder, then rebuilds the mirror from the chat history stored in the app library. User-authored files outside those folders are not touched.',
+              finalDetail:
+                'Second confirmation: permanently delete all mirrored Markdown and rebuild from chats?',
+            })
+          ) {
+            return;
+          }
+          try {
+            const result = await resetAllKnowledgeBase();
+            window.dispatchEvent(
+              new CustomEvent('mc:knowledge-sync', {
+                detail: {
+                  written: 0,
+                  skipped: 0,
+                  errors: [],
+                  resetCleared: result.cleared,
+                },
+              }),
+            );
+          } catch (err) {
+            console.error('[knowledge-mirror] reset failed', err);
+            window.dispatchEvent(
+              new CustomEvent('mc:knowledge-sync', {
+                detail: { error: String(err) },
+              }),
+            );
+          }
+        },
+      },
+      {
+        id: 'file.reset-knowledge-base-current',
+        title: lastConversationId
+          ? (() => {
+              const conv = conversations.find((c) => c.id === lastConversationId);
+              const project = conv?.projectId
+                ? useStore.getState().projects.find((p) => p.id === conv.projectId)
+                : null;
+              return project
+                ? `Reset Knowledge Base — project "${project.name}"`
+                : 'Reset Knowledge Base — default workspace';
+            })()
+          : 'Reset Knowledge Base — default workspace',
+        section: 'File',
+        run: async () => {
+          const conv = lastConversationId
+            ? conversations.find((c) => c.id === lastConversationId)
+            : undefined;
+          const project = conv?.projectId
+            ? useStore.getState().projects.find((p) => p.id === conv.projectId) ?? null
+            : null;
+          const label = project
+            ? `project "${project.name}"`
+            : 'the default workspace';
+          if (
+            !confirmDangerTwice({
+              title: `Reset Knowledge Base for ${label}?`,
+              detail: `This deletes every Markdown file under that scope in the working folder, then rebuilds it from the chat history stored in the app library. Other projects are not touched.`,
+              finalDetail:
+                'Second confirmation: permanently delete this scope and rebuild from chats?',
+            })
+          ) {
+            return;
+          }
+          try {
+            const result = await resetProjectKnowledgeBase(project);
+            window.dispatchEvent(
+              new CustomEvent('mc:knowledge-sync', {
+                detail: {
+                  written: 0,
+                  skipped: 0,
+                  errors: [],
+                  resetCleared: result.cleared,
+                },
+              }),
+            );
+          } catch (err) {
+            console.error('[knowledge-mirror] project reset failed', err);
+            window.dispatchEvent(
+              new CustomEvent('mc:knowledge-sync', {
+                detail: { error: String(err) },
+              }),
+            );
+          }
+        },
+      },
+      {
         id: 'file.export',
         title: 'Export to Markdown',
         section: 'File',
@@ -434,27 +574,6 @@ export function useCommands(): Command[] {
         },
       },
       {
-        id: 'editor.toggle-reading',
-        title: 'Toggle Reading view',
-        section: 'Editor',
-        when: () => Boolean(getCurrentEditor()),
-        run: () => dispatchEditorMode('reading'),
-      },
-      {
-        id: 'editor.toggle-source',
-        title: 'Toggle Source mode',
-        section: 'Editor',
-        when: () => Boolean(getCurrentEditor()),
-        run: () => dispatchEditorMode('source'),
-      },
-      {
-        id: 'editor.toggle-live-preview',
-        title: 'Toggle Live Preview',
-        section: 'Editor',
-        when: () => Boolean(getCurrentEditor()),
-        run: () => dispatchEditorMode('live-preview'),
-      },
-      {
         id: 'editor.open-in-canvas',
         title: 'Open current note in canvas',
         section: 'Editor',
@@ -498,6 +617,11 @@ export function useCommands(): Command[] {
     conversations,
     createConversation,
     canvasTool,
+    canvasWheelMode,
+    incognitoUnprojectedChats,
+    setCanvasWheelMode,
+    setIncognitoUnprojectedChats,
+    setGraphImportOpen,
     flow,
     lastConversationId,
     obsidianVaultPath,

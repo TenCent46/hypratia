@@ -27,17 +27,21 @@ export function NodeContextMenu({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function onDoc(e: MouseEvent) {
+    // Use pointerdown in capture phase: the canvas's marquee handler calls
+    // preventDefault() on pointerdown, which suppresses the synthesized
+    // mousedown — so a bubble-phase mousedown listener never fires when the
+    // user clicks empty canvas, and the menu would stay open.
+    function onDoc(e: PointerEvent) {
       if (!ref.current) return;
       if (!ref.current.contains(e.target as Node)) onClose();
     }
     function onEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
     }
-    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('pointerdown', onDoc, true);
     document.addEventListener('keydown', onEsc);
     return () => {
-      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('pointerdown', onDoc, true);
       document.removeEventListener('keydown', onEsc);
     };
   }, [onClose]);

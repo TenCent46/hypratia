@@ -5,17 +5,44 @@ import {
   resolveMarkdownRoot,
 } from '../../services/storage/MarkdownFileService';
 import { isMirroredFile } from '../../services/knowledge/conversationMarkdownMirror';
-import type { EditorMode } from '../../types';
 import { MarkdownEditorView, type MarkdownEditorViewHandle } from './editor/MarkdownEditorView';
-import { KbReadingView } from './editor/KbReadingView';
 import { EditorContextMenu } from './editor/EditorContextMenu';
 import type { EditorContextMenuItem } from './editor/EditorContextMenu';
 import { registerEditor } from './editor/editorRegistry';
 import { resolveKbWikilinkTarget } from './editor/extensions/wikilink';
+import {
+  findLinkHrefAt,
+  openMarkdownLinkExternal,
+} from './editor/extensions/markdownLinkClick';
 import { EditorSidePanel } from './editor/EditorSidePanel';
 import { PropertiesEditor } from './editor/PropertiesEditor';
 import { findAnchorLine } from './editor/sidePanel';
 import { reimportMarkdownIntoChat } from '../../services/knowledge/conversationMarkdownReimport';
+
+function fileNameFromPath(path: string): string {
+  const parts = path.split('/').filter(Boolean);
+  return parts[parts.length - 1] ?? 'Untitled.md';
+}
+
+function stemFromPath(path: string): string {
+  return fileNameFromPath(path).replace(/\.md$/i, '');
+}
+
+function fileNameFromTitle(value: string): string {
+  const stem = value
+    .trim()
+    .replace(/[/:\\]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+$/, '')
+    .replace(/\.md$/i, '')
+    .trim();
+  return `${stem || 'Untitled'}.md`;
+}
+
+function truncateForMenu(value: string, max = 48): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
 
 export function MarkdownDocumentEditor({
   path,
@@ -27,10 +54,9 @@ export function MarkdownDocumentEditor({
   onOpenInWindow?: () => void;
 }) {
   const configuredRoot = useStore((s) => s.settings.markdownStorageDir);
-  const editorMode = useStore<EditorMode>(
-    (s) => s.settings.editorMode ?? 'live-preview',
+  const markdownAutoSave = useStore(
+    (s) => s.settings.markdownAutoSave ?? true,
   );
-  const setEditorMode = useStore((s) => s.setEditorMode);
   const updateNode = useStore((s) => s.updateNode);
   const openAiPalette = useStore((s) => s.openAiPalette);
   const setSearchOpen = useStore((s) => s.setSearchOpen);
@@ -50,21 +76,29 @@ export function MarkdownDocumentEditor({
     y: number;
     items: EditorContextMenuItem[];
   } | null>(null);
-  const [sidePanelVisible, setSidePanelVisible] = useState(true);
+  // Side panel (Outline / Backlinks / Tags / Suggested) starts collapsed
+  // so the editor opens with the document text taking the full width.
+  // The user can expand it by clicking any tab icon on the rail.
+  const [sidePanelVisible, setSidePanelVisible] = useState(false);
   const [reimportToast, setReimportToast] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState(() => stemFromPath(path));
+  const [insertPrompt, setInsertPrompt] = useState<{
+    kind: 'link' | 'image';
+    text: string;
+    url: string;
+    range: { from: number; to: number };
+  } | null>(null);
   const editorRef = useRef<MarkdownEditorViewHandle | null>(null);
   const contentRef = useRef('');
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+  const titleCommitRef = useRef(false);
 
   const dirty = content !== savedContent;
   const documentReady = loadedPath === path && !loading && !error && rootPath;
   const showLoading = !error && (loading || loadedPath !== path);
   const isMirror = useMemo(() => isMirroredFile(savedContent), [savedContent]);
-  const title = useMemo(() => {
-    const parts = path.split('/').filter(Boolean);
-    return parts[parts.length - 1] ?? 'Untitled.md';
-  }, [path]);
   const breadcrumb = useMemo(() => path.split('/').filter(Boolean), [path]);
+  const titleStem = useMemo(() => stemFromPath(path), [path]);
   const stats = useMemo(() => {
     const trimmed = content.trim();
     const words = trimmed ? trimmed.split(/\s+/).length : 0;
@@ -90,12 +124,14 @@ export function MarkdownDocumentEditor({
         setContent(nextContent);
         setSavedContent(nextContent);
         setLoadedPath(path);
+        setTitleDraft(stemFromPath(path));
       } catch (err) {
         if (!cancelled) {
           setRootPath('');
           setContent('');
           setSavedContent('');
           setLoadedPath(path);
+          setTitleDraft(stemFromPath(path));
           setError(String(err));
         }
       } finally {
@@ -141,6 +177,53 @@ export function MarkdownDocumentEditor({
     return ok;
   }, [path, rootPath, updateNode]);
 
+  const commitTitle = useCallback(async (opts?: { focusBody?: boolean }) => {
+    const focusBody = () => {
+      if (opts?.focusBody) {
+        window.setTimeout(() => editorRef.current?.focus(), 0);
+      }
+    };
+    if (!rootPath || !path || titleCommitRef.current) {
+      focusBody();
+      return;
+    }
+    const nextStem = titleDraft.trim() || 'Untitled';
+    const currentStem = stemFromPath(path);
+    setTitleDraft(nextStem);
+    if (nextStem === currentStem) {
+      focusBody();
+      return;
+    }
+    titleCommitRef.current = true;
+    setError(null);
+    try {
+      if (dirty) {
+        const ok = await save();
+        if (!ok) return;
+      }
+      const nextPath = await markdownFiles.renamePath(
+        rootPath,
+        path,
+        fileNameFromTitle(nextStem),
+      );
+      for (const node of useStore.getState().nodes.filter((n) => n.mdPath === path)) {
+        updateNode(node.id, {
+          mdPath: nextPath,
+          title: nextStem,
+        });
+      }
+      window.dispatchEvent(new CustomEvent('mc:knowledge-tree-refresh'));
+      window.dispatchEvent(
+        new CustomEvent('mc:open-markdown-file', { detail: { path: nextPath } }),
+      );
+      focusBody();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      titleCommitRef.current = false;
+    }
+  }, [dirty, path, rootPath, save, titleDraft, updateNode]);
+
   const requestClose = useCallback(() => {
     void (async () => {
       if (dirty) {
@@ -159,12 +242,12 @@ export function MarkdownDocumentEditor({
   );
 
   useEffect(() => {
-    if (!documentReady || !dirty || saving) return;
+    if (!markdownAutoSave || !documentReady || !dirty || saving) return;
     const timer = window.setTimeout(() => {
       void save(content);
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [content, dirty, documentReady, save, saving]);
+  }, [content, dirty, documentReady, markdownAutoSave, save, saving]);
 
   const reveal = useCallback(async () => {
     if (!rootPath) return;
@@ -176,13 +259,12 @@ export function MarkdownDocumentEditor({
   }, [path, rootPath]);
 
   const copyObsidianLink = useCallback(async () => {
-    const stem = title.replace(/\.md$/i, '');
     try {
-      await navigator.clipboard.writeText(`[[${stem}]]`);
+      await navigator.clipboard.writeText(`[[${titleDraft.trim() || titleStem}]]`);
     } catch (err) {
       setError(`Clipboard write failed: ${String(err)}`);
     }
-  }, [title]);
+  }, [titleDraft, titleStem]);
 
   const copyMarkdownPath = useCallback(async () => {
     try {
@@ -208,7 +290,7 @@ export function MarkdownDocumentEditor({
       state.addNode({
         conversationId,
         kind: 'markdown',
-        title: title.replace(/\.md$/i, ''),
+        title: titleDraft.trim() || titleStem,
         contentMarkdown: live,
         mdPath: path,
         position,
@@ -223,14 +305,7 @@ export function MarkdownDocumentEditor({
     } catch (err) {
       setError(String(err));
     }
-  }, [content, path, rootPath, title]);
-
-  const setMode = useCallback(
-    (mode: EditorMode) => {
-      setEditorMode(mode);
-    },
-    [setEditorMode],
-  );
+  }, [content, path, rootPath, titleDraft, titleStem]);
 
   const reimport = useCallback(() => {
     if (!isMirror) {
@@ -258,25 +333,23 @@ export function MarkdownDocumentEditor({
       path,
       save: () => void save(),
       close: requestClose,
-      toggleMode: setMode,
+      // toggleMode is a legacy field; Live Preview is the only mode now,
+      // so the callback is a no-op that satisfies the registry signature.
+      toggleMode: () => {},
       isDirty: () => dirty,
       openInCanvas,
     });
-  }, [dirty, openInCanvas, path, requestClose, save, setMode]);
+  }, [dirty, openInCanvas, path, requestClose, save]);
 
-  // Listen for the mode-toggle / save / close commands dispatched by
-  // useCommands.ts. Keeping the wiring here means the editor stays in
-  // charge of its own dirty-state semantics.
+  // Listen for save / close / re-import commands dispatched by
+  // useCommands.ts. The mode-toggle event is intentionally ignored —
+  // legacy callers may still emit it but Live Preview is the only mode.
   useEffect(() => {
     function onSave() {
       void save();
     }
     function onClose2() {
       requestClose();
-    }
-    function onToggleMode(e: Event) {
-      const detail = (e as CustomEvent<{ mode?: EditorMode }>).detail;
-      if (detail?.mode) setMode(detail.mode);
     }
     function onCreateNote(e: Event) {
       const name = (e as CustomEvent<{ name?: string }>).detail?.name?.trim();
@@ -301,17 +374,15 @@ export function MarkdownDocumentEditor({
     }
     window.addEventListener('mc:editor-save', onSave);
     window.addEventListener('mc:editor-close', onClose2);
-    window.addEventListener('mc:editor-toggle-mode', onToggleMode);
     window.addEventListener('mc:create-kb-note', onCreateNote);
     window.addEventListener('mc:editor-reimport', onReimport);
     return () => {
       window.removeEventListener('mc:editor-save', onSave);
       window.removeEventListener('mc:editor-close', onClose2);
-      window.removeEventListener('mc:editor-toggle-mode', onToggleMode);
       window.removeEventListener('mc:create-kb-note', onCreateNote);
       window.removeEventListener('mc:editor-reimport', onReimport);
     };
-  }, [reimport, requestClose, rootPath, save, setMode]);
+  }, [reimport, requestClose, rootPath, save]);
 
   // When `mc:open-markdown-file` arrives with an anchor and the path is
   // already this file, jump in-place. The App-level handler still fires
@@ -332,23 +403,109 @@ export function MarkdownDocumentEditor({
     return () => window.removeEventListener('mc:open-markdown-file', onOpenWithAnchor);
   }, [content, path]);
 
+  const openInsertPrompt = useCallback(
+    (kind: 'link' | 'image') => {
+      const view = editorRef.current?.view;
+      if (!view) return;
+      const sel = view.state.selection.main;
+      const selectedText = view.state.sliceDoc(sel.from, sel.to);
+      const looksLikeUrl =
+        selectedText && /^(https?:|file:|mailto:|tel:|\/)/i.test(selectedText);
+      setInsertPrompt({
+        kind,
+        text: looksLikeUrl ? '' : selectedText,
+        url: looksLikeUrl ? selectedText : '',
+        range: { from: sel.from, to: sel.to },
+      });
+    },
+    [],
+  );
+
+  const commitInsertPrompt = useCallback(() => {
+    if (!insertPrompt) return;
+    const view = editorRef.current?.view;
+    if (!view) {
+      setInsertPrompt(null);
+      return;
+    }
+    const url = insertPrompt.url.trim();
+    if (!url) {
+      setInsertPrompt(null);
+      return;
+    }
+    const text =
+      insertPrompt.text.trim() || (insertPrompt.kind === 'image' ? 'image' : url);
+    const insert =
+      insertPrompt.kind === 'image' ? `![${text}](${url})` : `[${text}](${url})`;
+    view.dispatch({
+      changes: {
+        from: insertPrompt.range.from,
+        to: insertPrompt.range.to,
+        insert,
+      },
+      selection: { anchor: insertPrompt.range.from + insert.length },
+      userEvent:
+        insertPrompt.kind === 'image' ? 'input.insert-image' : 'input.insert-link',
+      scrollIntoView: true,
+    });
+    setInsertPrompt(null);
+    window.requestAnimationFrame(() => view.focus());
+  }, [insertPrompt]);
+
   const buildMenuItemsFor = useCallback(
-    (selectionText: string): EditorContextMenuItem[] => {
+    (
+      selectionText: string,
+      linkAtCursor: { href: string } | null = null,
+    ): EditorContextMenuItem[] => {
       const items: EditorContextMenuItem[] = [
+        ...(!markdownAutoSave
+          ? [{
+              label: 'Save',
+              onSelect: () => void save(),
+              disabled: !dirty || saving,
+            } satisfies EditorContextMenuItem]
+          : []),
         { label: 'Close Editor / Return to Canvas', onSelect: requestClose },
+      ];
+      if (linkAtCursor) {
+        const isExternal = /^(https?:|mailto:|file:|tel:)/i.test(
+          linkAtCursor.href,
+        );
+        items.push({ separator: true });
+        items.push({
+          label: isExternal
+            ? `Go to Link → ${truncateForMenu(linkAtCursor.href)}`
+            : `Open Link → ${truncateForMenu(linkAtCursor.href)}`,
+          onSelect: () =>
+            void openMarkdownLinkExternal(linkAtCursor.href, rootPath, path),
+        });
+        items.push({
+          label: 'Copy Link Address',
+          onSelect: () => {
+            void navigator.clipboard
+              .writeText(linkAtCursor.href)
+              .catch((err) =>
+                setError(`Clipboard write failed: ${String(err)}`),
+              );
+          },
+        });
+        items.push({ separator: true });
+      }
+      items.push(
         { label: 'Reveal in Finder', onSelect: () => void reveal() },
         { label: 'Copy Obsidian Link', onSelect: () => void copyObsidianLink() },
         { label: 'Copy Markdown Path', onSelect: () => void copyMarkdownPath() },
         { label: 'Open in Canvas', onSelect: () => void openInCanvas() },
+        { separator: true },
         {
-          label: editorMode === 'reading' ? 'Exit Reading View' : 'Toggle Reading View',
-          onSelect: () => setMode(editorMode === 'reading' ? 'live-preview' : 'reading'),
+          label: 'Insert Link…',
+          onSelect: () => openInsertPrompt('link'),
         },
         {
-          label: editorMode === 'source' ? 'Exit Source Mode' : 'Toggle Source Mode',
-          onSelect: () => setMode(editorMode === 'source' ? 'live-preview' : 'source'),
+          label: 'Insert Image…',
+          onSelect: () => openInsertPrompt('image'),
         },
-      ];
+      );
       if (isMirror) {
         items.push({ separator: true });
         items.push({
@@ -372,15 +529,19 @@ export function MarkdownDocumentEditor({
     [
       copyMarkdownPath,
       copyObsidianLink,
-      editorMode,
+      dirty,
       isMirror,
+      markdownAutoSave,
       openAiPalette,
       openInCanvas,
+      openInsertPrompt,
       path,
       reimport,
       requestClose,
       reveal,
-      setMode,
+      rootPath,
+      save,
+      saving,
       setSearchOpen,
     ],
   );
@@ -390,27 +551,19 @@ export function MarkdownDocumentEditor({
       e.preventDefault();
       const view = editorRef.current?.view;
       let selectionText = '';
+      let linkAtCursor: { href: string } | null = null;
       if (view) {
         const sel = view.state.selection.main;
         if (!sel.empty) selectionText = view.state.sliceDoc(sel.from, sel.to);
+        const pos =
+          view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? sel.head;
+        const found = findLinkHrefAt(view.state.doc.toString(), pos);
+        if (found) linkAtCursor = { href: found.href };
       }
       setMenu({
         x: e.clientX,
         y: e.clientY,
-        items: buildMenuItemsFor(selectionText),
-      });
-    },
-    [buildMenuItemsFor],
-  );
-
-  const onReadingContextMenu = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      const selectionText = window.getSelection()?.toString() ?? '';
-      setMenu({
-        x: e.clientX,
-        y: e.clientY,
-        items: buildMenuItemsFor(selectionText),
+        items: buildMenuItemsFor(selectionText, linkAtCursor),
       });
     },
     [buildMenuItemsFor],
@@ -425,7 +578,6 @@ export function MarkdownDocumentEditor({
               ? breadcrumb.slice(0, -1).join(' / ')
               : 'Local Markdown'}
           </div>
-          <h1>{title}</h1>
         </div>
         <div className="markdown-document-actions">
           {onOpenInWindow ? (
@@ -438,18 +590,6 @@ export function MarkdownDocumentEditor({
               Window
             </button>
           ) : null}
-          <label className="editor-mode-select" title="Editor mode">
-            <span className="sr-only">Editor mode</span>
-            <select
-              value={editorMode}
-              onChange={(e) => setMode(e.target.value as EditorMode)}
-              aria-label="Editor mode"
-            >
-              <option value="live-preview">Live preview</option>
-              <option value="source">Source</option>
-              <option value="reading">Read</option>
-            </select>
-          </label>
           <button
             type="button"
             onClick={requestClose}
@@ -473,30 +613,6 @@ export function MarkdownDocumentEditor({
           <div className="markdown-document-loading">Loading document...</div>
         ) : (
           <div className="markdown-document-split">
-            <div className="markdown-document-main">
-              {editorMode !== 'source' ? (
-                <PropertiesEditor
-                  doc={content}
-                  onChange={handleContentChange}
-                />
-              ) : null}
-              {editorMode === 'reading' && documentReady ? (
-                <div onContextMenu={onReadingContextMenu} className="markdown-document-reader-host">
-                  <KbReadingView source={content} rootPath={rootPath} />
-                </div>
-              ) : documentReady ? (
-                <MarkdownEditorView
-                  ref={editorRef}
-                  initialDoc={content}
-                  filePath={path}
-                  rootPath={rootPath}
-                  mode={editorMode === 'source' ? 'source' : 'live-preview'}
-                  onChange={handleContentChange}
-                  onSave={() => void save()}
-                  onContextMenu={onContextMenu}
-                />
-              ) : null}
-            </div>
             <EditorSidePanel
               doc={content}
               rootPath={rootPath}
@@ -518,6 +634,37 @@ export function MarkdownDocumentEditor({
                 }
               }}
             />
+            <div className="markdown-document-main">
+              <input
+                className="markdown-document-title-input"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={() => void commitTitle()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void commitTitle({ focusBody: true });
+                  }
+                }}
+                aria-label="Markdown file title"
+                spellCheck={false}
+              />
+              <PropertiesEditor
+                doc={content}
+                onChange={handleContentChange}
+              />
+              {documentReady ? (
+                <MarkdownEditorView
+                  ref={editorRef}
+                  initialDoc={content}
+                  filePath={path}
+                  rootPath={rootPath}
+                  onChange={handleContentChange}
+                  onSave={() => void save()}
+                  onContextMenu={onContextMenu}
+                />
+              ) : null}
+            </div>
           </div>
         )}
       </div>
@@ -525,7 +672,17 @@ export function MarkdownDocumentEditor({
         <span>{rootPath}</span>
         <span>
           <span className={`markdown-save-state${dirty ? ' dirty' : ''}`}>
-            {saving ? 'Autosaving...' : dirty ? 'Autosave pending' : 'Autosaved'}
+            {markdownAutoSave
+              ? saving
+                ? 'Autosaving...'
+                : dirty
+                  ? 'Autosave pending'
+                  : 'Autosaved'
+              : saving
+                ? 'Saving...'
+                : dirty
+                  ? 'Unsaved'
+                  : 'Saved'}
           </span>
           {' · '}
           {stats.words} words / {stats.chars} chars
@@ -544,6 +701,89 @@ export function MarkdownDocumentEditor({
           {reimportToast}
         </div>
       ) : null}
+      {insertPrompt ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => setInsertPrompt(null)}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div
+            className="modal markdown-insert-prompt"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header>
+              <h2>
+                {insertPrompt.kind === 'image' ? 'Insert Image' : 'Insert Link'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setInsertPrompt(null)}
+                aria-label="Cancel"
+              >
+                ×
+              </button>
+            </header>
+            <label>
+              <span>{insertPrompt.kind === 'image' ? 'Alt text' : 'Link text'}</span>
+              <input
+                type="text"
+                value={insertPrompt.text}
+                placeholder={
+                  insertPrompt.kind === 'image' ? 'image' : 'visible text'
+                }
+                onChange={(e) =>
+                  setInsertPrompt((cur) =>
+                    cur ? { ...cur, text: e.target.value } : cur,
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitInsertPrompt();
+                  } else if (e.key === 'Escape') {
+                    setInsertPrompt(null);
+                  }
+                }}
+              />
+            </label>
+            <label>
+              <span>URL</span>
+              <input
+                autoFocus
+                type="text"
+                value={insertPrompt.url}
+                placeholder="https://… or /local/path"
+                onChange={(e) =>
+                  setInsertPrompt((cur) =>
+                    cur ? { ...cur, url: e.target.value } : cur,
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitInsertPrompt();
+                  } else if (e.key === 'Escape') {
+                    setInsertPrompt(null);
+                  }
+                }}
+              />
+            </label>
+            <div className="markdown-insert-prompt-actions">
+              <button type="button" onClick={() => setInsertPrompt(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={commitInsertPrompt}
+                disabled={!insertPrompt.url.trim()}
+              >
+                Insert
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -552,3 +792,4 @@ export function MarkdownDocumentEditor({
 // resolve the link under the cursor. Keeping the import alive here means
 // the commands module does not need to know about wikilink internals.
 void resolveKbWikilinkTarget;
+

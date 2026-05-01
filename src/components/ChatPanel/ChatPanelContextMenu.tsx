@@ -4,11 +4,16 @@ import {
   AppContextMenuItem as Item,
   AppContextMenuSeparator as Separator,
 } from '../ContextMenu/AppContextMenuItem';
+import {
+  PaneMenuSubmenu,
+  type PaneMenuControl,
+} from '../PanesContextMenu/PanesContextMenu';
 
 export type ChatPanelContextMenuProps = {
   x: number;
   y: number;
   panelState?: 'shown' | 'hidden';
+  paneMenuItems?: PaneMenuControl[];
   onShow?: () => void;
   onHide?: () => void;
   onClose: () => void;
@@ -18,6 +23,7 @@ export function ChatPanelContextMenu({
   x,
   y,
   panelState = 'shown',
+  paneMenuItems,
   onShow,
   onHide,
   onClose,
@@ -118,23 +124,32 @@ export function ChatPanelContextMenu({
       <Separator />
       <Item onClick={newGroup} label="New Group" />
       <Separator />
-      <Item
-        onClick={() => {
-          onShow?.();
-          onClose();
-        }}
-        label="Show Chat"
-        checked={panelState === 'shown'}
-      />
-      <Item
-        onClick={() => {
-          onHide?.();
-          onClose();
-        }}
-        label="Hide Chat"
-        checked={panelState === 'hidden'}
-      />
-      <Separator />
+      {paneMenuItems ? (
+        <>
+          <PaneMenuSubmenu items={paneMenuItems} onSelect={onClose} />
+          <Separator />
+        </>
+      ) : (
+        <>
+          <Item
+            onClick={() => {
+              onShow?.();
+              onClose();
+            }}
+            label="Show Chat"
+            checked={panelState === 'shown'}
+          />
+          <Item
+            onClick={() => {
+              onHide?.();
+              onClose();
+            }}
+            label="Hide Chat"
+            checked={panelState === 'hidden'}
+          />
+          <Separator />
+        </>
+      )}
       <Item
         onClick={() => {
           setChatTabsInSidebar(!chatTabsInSidebar);
@@ -154,4 +169,3 @@ export function ChatPanelContextMenu({
     </div>
   );
 }
-

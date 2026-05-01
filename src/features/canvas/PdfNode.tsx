@@ -13,8 +13,16 @@ export type PdfNodeType = Node<PdfNodeData, 'pdf'>;
 
 function PdfNodeImpl({ data, selected }: NodeProps<PdfNodeType>) {
   const att = useStore((s) => s.attachments.find((a) => a.id === data.attachmentId));
-  const setPdfViewer = useStore((s) => s.setPdfViewer);
   const [url, setUrl] = useState<string | null>(null);
+
+  function openPreview() {
+    if (!att) return;
+    window.dispatchEvent(
+      new CustomEvent('mc:open-attachment-preview', {
+        detail: { attachmentId: att.id, title: data.title || att.filename },
+      }),
+    );
+  }
 
   useEffect(() => {
     if (!att) return;
@@ -40,7 +48,7 @@ function PdfNodeImpl({ data, selected }: NodeProps<PdfNodeType>) {
         <NodeHandles />
         <div className="title">📄 {data.title || 'PDF'}</div>
         <div className="content">
-          <div className="pdf-thumb" onDoubleClick={() => att && setPdfViewer(att.id)}>
+          <div className="pdf-thumb" onDoubleClick={openPreview}>
             <span className="muted">
               {att
                 ? `${(att.bytes / 1024 / 1024).toFixed(1)} MB · ${att.pageCount ?? '?'} pages`
@@ -52,10 +60,10 @@ function PdfNodeImpl({ data, selected }: NodeProps<PdfNodeType>) {
                 className="link"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (att) setPdfViewer(att.id);
+                  openPreview();
                 }}
               >
-                Open viewer →
+                Preview →
               </button>
             ) : null}
           </div>

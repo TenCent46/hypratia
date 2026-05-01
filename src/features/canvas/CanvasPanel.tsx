@@ -27,10 +27,16 @@ import { ImageNode, type ImageNodeType } from './ImageNode';
 import { PdfNode, type PdfNodeType } from './PdfNode';
 import { ArtifactNode, type ArtifactNodeType } from './ArtifactNode';
 import {
+  ThemeNode,
+  themeNodeDataFromCanvasNode,
+  type ThemeNodeType,
+} from './ThemeNode';
+import {
   NodeContextMenu,
   type NodeContextMenuState,
 } from '../../components/NodeContextMenu/NodeContextMenu';
 import { CanvasPanelContextMenu } from '../../components/CanvasPanel/CanvasPanelContextMenu';
+import type { PaneMenuControl } from '../../components/PanesContextMenu/PanesContextMenu';
 import {
   getCurrentMessageDragId,
   getCrossWindowDragFallbackPayload,
@@ -67,6 +73,7 @@ const nodeTypes: NodeTypes = {
   image: ImageNode,
   pdf: PdfNode,
   artifact: ArtifactNode,
+  theme: ThemeNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -236,6 +243,7 @@ function FlexibleEdge(props: EdgeProps<RfEdge<FlexibleEdgeData>>) {
 export type CanvasPanelProps = {
   canvasPanelState?: 'shown' | 'hidden';
   chatPanelState?: 'shown' | 'hidden';
+  paneMenuItems?: PaneMenuControl[];
   onShowCanvas?: () => void;
   onHideCanvas?: () => void;
   onShowChat?: () => void;
@@ -245,6 +253,7 @@ export type CanvasPanelProps = {
 export function CanvasPanel({
   canvasPanelState,
   chatPanelState,
+  paneMenuItems,
   onShowCanvas,
   onHideCanvas,
   onShowChat,
@@ -265,6 +274,12 @@ export function CanvasPanel({
   );
   const canvasTool = useStore((s) => s.ui.canvasTool);
   const setCanvasTool = useStore((s) => s.setCanvasTool);
+  const wheelMode = useStore(
+    (s) => s.settings.canvasWheelMode ?? 'pan',
+  );
+  const setCanvasWheelMode = useStore((s) => s.setCanvasWheelMode);
+  const toggleWheelMode = () =>
+    setCanvasWheelMode(wheelMode === 'pan' ? 'zoom' : 'pan');
   const editingNodeId = useStore((s) => s.ui.editingNodeId);
   const viewportByConv = useStore((s) => s.settings.viewportByConversation);
   const updateNodePosition = useStore((s) => s.updateNodePosition);
@@ -288,6 +303,13 @@ export function CanvasPanel({
   const { send } = useChatStream();
   const [dragOver, setDragOver] = useState(false);
   const [dropTargetNodeId, setDropTargetNodeId] = useState<string | null>(null);
+  const [dupToast, setDupToast] = useState<{ id: number } | null>(null);
+  const suppressDupWarning = useStore(
+    (s) => s.settings.suppressDuplicateChatNodeWarning ?? false,
+  );
+  const setSuppressDupWarning = useStore(
+    (s) => s.setSuppressDuplicateChatNodeWarning,
+  );
   const [ctxMenu, setCtxMenu] = useState<NodeContextMenuState | null>(null);
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number } | null>(null);
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
@@ -348,7 +370,11 @@ export function CanvasPanel({
       ? storeNodes.filter((n) => n.conversationId === conversationId)
       : [];
     return visible.map<
-      MarkdownNodeType | ImageNodeType | PdfNodeType | ArtifactNodeType
+      | MarkdownNodeType
+      | ImageNodeType
+      | PdfNodeType
+      | ArtifactNodeType
+      | ThemeNodeType
     >((n) => {
       const hue = showGlobal ? hueFromId(n.conversationId) : undefined;
       // While a Markdown node is being edited inline, drop its persisted
@@ -400,6 +426,18 @@ export function CanvasPanel({
           data: { title: n.title, attachmentId: n.attachmentIds[0], hue },
         } satisfies ArtifactNodeType;
       }
+      if (n.kind === 'theme') {
+        return {
+          id: n.id,
+          type: 'theme',
+          selected: selectedNodeIds.includes(n.id),
+          position: n.position,
+          ...(n.width ? { width: n.width } : {}),
+          ...(n.height ? { height: n.height } : {}),
+          style: sizeStyle,
+          data: { ...themeNodeDataFromCanvasNode(n), hue },
+        } satisfies ThemeNodeType;
+      }
       return {
         id: n.id,
         type: 'markdown',
@@ -445,6 +483,16 @@ export function CanvasPanel({
             }
           : undefined;
         const data: FlexibleEdgeData = sourceMarker ? { sourceMarker } : {};
+        const isSelected = selectedEdgeIds.includes(e.id);
+        const baseStyle: Record<string, string | number> = {};
+        if (e.kind === 'related') {
+          baseStyle.strokeDasharray = '6 4';
+          baseStyle.stroke = 'var(--text-mute)';
+        }
+        if (isSelected) {
+          baseStyle.stroke = 'var(--accent)';
+          baseStyle.strokeWidth = 2.5;
+        }
         return {
           id: e.id,
           source: e.sourceNodeId,
@@ -452,10 +500,9 @@ export function CanvasPanel({
           type: 'flexible',
           data,
           label: e.label,
-          selected: selectedEdgeIds.includes(e.id),
-          style: selectedEdgeIds.includes(e.id)
-            ? { stroke: 'var(--accent)', strokeWidth: 2.5 }
-            : undefined,
+          selected: isSelected,
+          style: Object.keys(baseStyle).length > 0 ? baseStyle : undefined,
+          className: e.kind ? `edge-kind-${e.kind}` : undefined,
         };
       });
   }, [storeEdges, storeNodes, rfNodes, selectedEdgeIds]);
@@ -498,7 +545,18 @@ export function CanvasPanel({
 
   function onConnect(c: Connection) {
     if (!c.source || !c.target || c.source === c.target) return;
-    const edge = addEdge({ sourceNodeId: c.source, targetNodeId: c.target });
+    // Connecting two theme-kind nodes manually defaults to a `related` edge
+    // (dashed). Auto-created parent-child edges are minted server-side via
+    // `kind: 'parent'` and never go through this path.
+    const sourceNode = storeNodes.find((n) => n.id === c.source);
+    const targetNode = storeNodes.find((n) => n.id === c.target);
+    const isThemeLink =
+      sourceNode?.kind === 'theme' && targetNode?.kind === 'theme';
+    const edge = addEdge({
+      sourceNodeId: c.source,
+      targetNodeId: c.target,
+      ...(isThemeLink ? { kind: 'related' as const } : {}),
+    });
     void syncConnectedMarkdownLinks(c.source, c.target);
     setCanvasSelection(
       [c.source, c.target],
@@ -1046,7 +1104,18 @@ export function CanvasPanel({
 
     if (e.dataTransfer.files.length > 0 && targetConv) {
       e.preventDefault();
-      void ingestDroppedFiles(Array.from(e.dataTransfer.files), targetConv, position);
+      const ingested = await ingestDroppedFiles(
+        Array.from(e.dataTransfer.files),
+        targetConv,
+        position,
+      );
+      for (const item of ingested.filter((f) => f.preview)) {
+        window.dispatchEvent(
+          new CustomEvent('mc:open-attachment-preview', {
+            detail: { attachmentId: item.attachment.id, title: item.title },
+          }),
+        );
+      }
       return;
     }
 
@@ -1058,6 +1127,13 @@ export function CanvasPanel({
       if (!payload) return;
       const tConv = showGlobal ? payload.chatId : conversationId;
       if (!tConv) return;
+      if (
+        payload.messageId &&
+        isMessageAlreadyOnCanvas(payload.messageId, tConv)
+      ) {
+        notifyDuplicateDrop();
+        return;
+      }
       const dropTarget = dropNodeId
         ? useStore.getState().nodes.find((n) => n.id === dropNodeId)
         : null;
@@ -1074,6 +1150,7 @@ export function CanvasPanel({
       {
         const content = payload.content || 'Dropped chat card';
         const size = defaultMarkdownNodeSize(content);
+        const role = payload.metadata?.role;
         addNode({
           conversationId: tConv,
           title: deriveTitle(payload.content),
@@ -1082,7 +1159,15 @@ export function CanvasPanel({
           position,
           width: size.width,
           height: size.height,
-          tags: [],
+          tags: role ? [`role:${role}`] : [],
+          // Preserve the source message's metadata for cross-window
+          // drops too. `payload.metadata.createdAt` is provided by the
+          // dragging window via `createCrossWindowDragPayload`.
+          frontmatter: {
+            sourceCreatedAt: payload.metadata?.createdAt,
+            sourceRole: role,
+            sourceConversationId: payload.chatId,
+          },
         });
       }
       return;
@@ -1094,6 +1179,10 @@ export function CanvasPanel({
     if (!msg) return;
     const tConv = showGlobal ? msg.conversationId : conversationId;
     if (!tConv) return;
+    if (isMessageAlreadyOnCanvas(messageId, tConv)) {
+      notifyDuplicateDrop();
+      return;
+    }
     const dropTarget = dropNodeId
       ? useStore.getState().nodes.find((n) => n.id === dropNodeId)
       : null;
@@ -1118,9 +1207,47 @@ export function CanvasPanel({
         position,
         width: size.width,
         height: size.height,
-        tags: [],
+        tags: [`role:${msg.role}`],
+        // Preserve the source message's metadata. The node's own
+        // `createdAt` records when it landed on the canvas; the
+        // frontmatter keeps the message's original createdAt and role
+        // so downstream consumers (export, search, dedupe) can tell
+        // them apart.
+        frontmatter: {
+          sourceCreatedAt: msg.createdAt,
+          sourceRole: msg.role,
+          sourceConversationId: msg.conversationId,
+        },
       });
     }
+  }
+
+  /**
+   * Returns true if a chat-message-derived node already exists on the
+   * canvas for this conversation. The check by `sourceMessageId` is
+   * load-bearing: the canvas allows multiple plain notes per chat, but
+   * a given chat message should only ever have one node tying back to
+   * its source.
+   */
+  function isMessageAlreadyOnCanvas(
+    messageId: string,
+    convId: string,
+  ): boolean {
+    return useStore
+      .getState()
+      .nodes.some(
+        (n) => n.sourceMessageId === messageId && n.conversationId === convId,
+      );
+  }
+
+  /**
+   * Surface the "already on canvas" toast unless the user clicked
+   * "Don't show again" previously. The duplicate is silently skipped
+   * either way — we never produce a second node for the same message.
+   */
+  function notifyDuplicateDrop() {
+    if (suppressDupWarning) return;
+    setDupToast({ id: Date.now() });
   }
 
   useEffect(() => {
@@ -1192,9 +1319,12 @@ export function CanvasPanel({
         minZoom={MIN_CANVAS_ZOOM}
         maxZoom={MAX_CANVAS_ZOOM}
         panOnDrag={false}
-        panOnScroll
+        panOnScroll={wheelMode === 'pan'}
+        zoomOnScroll={wheelMode === 'zoom'}
         zoomOnPinch
-        zoomActivationKeyCode={['Meta', 'Control']}
+        zoomActivationKeyCode={
+          wheelMode === 'pan' ? ['Meta', 'Control'] : null
+        }
         nodesDraggable={canvasTool === 'select'}
         nodesConnectable={!showGlobal && canvasTool === 'select'}
         elementsSelectable={canvasTool === 'select'}
@@ -1203,7 +1333,12 @@ export function CanvasPanel({
       >
         <Background gap={24} size={1} color={dotColor} />
       </ReactFlow>
-      <CanvasToolSwitcher tool={canvasTool} onChange={setCanvasTool} />
+      <CanvasToolSwitcher
+        tool={canvasTool}
+        onChange={setCanvasTool}
+        wheelMode={wheelMode}
+        onToggleWheelMode={toggleWheelMode}
+      />
       {marquee?.active ? <MarqueeOverlay rect={rectFromPoints(marquee.startScreen, marquee.currentScreen)} /> : null}
       {showGlobal ? (
         <GlobalVisibilityPanel
@@ -1332,6 +1467,7 @@ export function CanvasPanel({
           y={paneMenu.y}
           canvasPanelState={canvasPanelState}
           chatPanelState={chatPanelState}
+          paneMenuItems={paneMenuItems}
           canvasTool={canvasTool}
           hasSelection={selectedNodeIds.length > 0}
           hasNodes={rfNodes.length > 0}
@@ -1355,7 +1491,57 @@ export function CanvasPanel({
             : 'Start anywhere.'}
         </div>
       ) : null}
+      {dupToast ? (
+        <DuplicateDropToast
+          key={dupToast.id}
+          onDismiss={() => setDupToast(null)}
+          onSuppress={() => {
+            setSuppressDupWarning(true);
+            setDupToast(null);
+          }}
+        />
+      ) : null}
     </main>
+  );
+}
+
+/**
+ * "Already on canvas" notification for duplicate per-message drops.
+ * Auto-dismisses after a few seconds; the "Don't show again" button
+ * persists the choice via `setSuppressDuplicateChatNodeWarning`.
+ */
+function DuplicateDropToast({
+  onDismiss,
+  onSuppress,
+}: {
+  onDismiss: () => void;
+  onSuppress: () => void;
+}) {
+  useEffect(() => {
+    const t = window.setTimeout(onDismiss, 4500);
+    return () => window.clearTimeout(t);
+  }, [onDismiss]);
+  return (
+    <div className="canvas-duplicate-toast" role="status" aria-live="polite">
+      <span className="canvas-duplicate-toast-text">
+        This message is already on the canvas.
+      </span>
+      <button
+        type="button"
+        className="canvas-duplicate-toast-suppress"
+        onClick={onSuppress}
+      >
+        Don't show again
+      </button>
+      <button
+        type="button"
+        className="canvas-duplicate-toast-close"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
+    </div>
   );
 }
 
@@ -1438,12 +1624,70 @@ function MarqueeOverlay({ rect }: { rect: Rect }) {
   );
 }
 
+// Stroked black-and-white icons for the canvas tool switcher. Inline SVG
+// instead of glyph emoji so the look stays consistent across platforms
+// and the buttons inherit the toolbar's `currentColor`.
+const ICON_PROPS = {
+  width: 16,
+  height: 16,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.6,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+};
+
+function SelectToolIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M5 3l13 7-6 1-2.5 6L5 3z" />
+    </svg>
+  );
+}
+
+function HandToolIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M9 11V5.5a1.5 1.5 0 113 0V11" />
+      <path d="M12 11V4.5a1.5 1.5 0 113 0V11" />
+      <path d="M15 11V5.5a1.5 1.5 0 113 0V13" />
+      <path d="M9 11V8a1.5 1.5 0 10-3 0v6a7 7 0 007 7h.5a6.5 6.5 0 006.5-6.5V11" />
+    </svg>
+  );
+}
+
+function ScrollPanIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M12 4v16" />
+      <path d="M8 8l4-4 4 4" />
+      <path d="M8 16l4 4 4-4" />
+    </svg>
+  );
+}
+
+function ZoomIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="11" cy="11" r="6" />
+      <path d="M11 8v6M8 11h6" />
+      <path d="M16 16l4 4" />
+    </svg>
+  );
+}
+
 function CanvasToolSwitcher({
   tool,
   onChange,
+  wheelMode,
+  onToggleWheelMode,
 }: {
   tool: CanvasTool;
   onChange: (tool: CanvasTool) => void;
+  wheelMode: 'pan' | 'zoom';
+  onToggleWheelMode: () => void;
 }) {
   return (
     <div className="canvas-tool-switcher nodrag" aria-label="Canvas tools">
@@ -1454,7 +1698,7 @@ function CanvasToolSwitcher({
         title="Select Tool (V)"
         onClick={() => onChange('select')}
       >
-        <span aria-hidden="true">↖</span>
+        <SelectToolIcon />
       </button>
       <button
         type="button"
@@ -1463,7 +1707,21 @@ function CanvasToolSwitcher({
         title="Hand Tool (H)"
         onClick={() => onChange('hand')}
       >
-        <span aria-hidden="true">✋</span>
+        <HandToolIcon />
+      </button>
+      <span className="canvas-tool-sep" aria-hidden="true" />
+      <button
+        type="button"
+        className={wheelMode === 'pan' ? 'active' : ''}
+        aria-pressed={wheelMode === 'pan'}
+        title={
+          wheelMode === 'pan'
+            ? 'Wheel scrolls/pans (S to switch to zoom)'
+            : 'Wheel zooms (S to switch to scroll/pan)'
+        }
+        onClick={onToggleWheelMode}
+      >
+        {wheelMode === 'pan' ? <ScrollPanIcon /> : <ZoomIcon />}
       </button>
     </div>
   );
@@ -1496,17 +1754,19 @@ function SelectionContextMenu({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    function onDoc(e: globalThis.MouseEvent) {
+    // pointerdown/capture: the canvas marquee handler preventDefault()'s
+    // pointerdown, which suppresses mousedown on the empty pane.
+    function onDoc(e: globalThis.PointerEvent) {
       if (!ref.current) return;
       if (!ref.current.contains(e.target as Node)) onClose();
     }
     function onEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
     }
-    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('pointerdown', onDoc, true);
     document.addEventListener('keydown', onEsc);
     return () => {
-      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('pointerdown', onDoc, true);
       document.removeEventListener('keydown', onEsc);
     };
   }, [onClose]);
@@ -1549,17 +1809,19 @@ function TextSelectionContextMenu({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    function onDoc(e: globalThis.MouseEvent) {
+    // pointerdown/capture: the canvas marquee handler preventDefault()'s
+    // pointerdown, which suppresses mousedown on the empty pane.
+    function onDoc(e: globalThis.PointerEvent) {
       if (!ref.current) return;
       if (!ref.current.contains(e.target as Node)) onClose();
     }
     function onEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
     }
-    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('pointerdown', onDoc, true);
     document.addEventListener('keydown', onEsc);
     return () => {
-      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('pointerdown', onDoc, true);
       document.removeEventListener('keydown', onEsc);
     };
   }, [onClose]);

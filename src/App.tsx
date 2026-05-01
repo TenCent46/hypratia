@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
@@ -10,13 +11,20 @@ import { Sidebar } from './components/Sidebar/Sidebar';
 import { ViewModeToggle } from './components/ViewModeToggle/ViewModeToggle';
 import { CanvasPanel } from './features/canvas/CanvasPanel';
 import { MarkdownDocumentEditor } from './features/knowledge/MarkdownDocumentEditor';
+import { AttachmentPreview } from './features/preview/AttachmentPreview';
 import { RightPane } from './components/RightPane/RightPane';
+import {
+  PanesContextMenu,
+  type PaneMenuControl,
+} from './components/PanesContextMenu/PanesContextMenu';
 import { SettingsModal } from './components/SettingsModal/SettingsModal';
 import { SearchPalette } from './features/search/SearchPalette';
 import { CommandPalette } from './components/CommandPalette/CommandPalette';
 import { ShortcutsModal } from './components/CommandPalette/ShortcutsModal';
 import { QuickCapture } from './components/QuickCapture/QuickCapture';
 import { AIPalette } from './features/ai-palette/AIPalette';
+import { GraphImportModal } from './features/graph-import/GraphImportModal';
+import { WorkspaceConfigModal } from './features/workspace-config/WorkspaceConfigModal';
 import { PdfViewer } from './features/pdf/PdfViewer';
 import { Onboarding } from './components/Onboarding/Onboarding';
 import { hydrateAndWire } from './store/persistence';
@@ -37,6 +45,25 @@ import './App.css';
 
 type PanelState = 'shown' | 'hidden';
 type PaneId = 'sidebar' | 'markdown' | 'canvas' | 'right';
+/**
+ * Open documents in the workspace pane. The `preview` flag follows
+ * VSCode's preview-tab convention:
+ *   - A single click in the file explorer opens the file as a preview
+ *     tab (italic title). The previous preview tab is replaced — only
+ *     one preview slot exists at a time.
+ *   - Editing the file does NOT promote the tab; it stays in preview.
+ *   - Double-clicking the tab title promotes it to permanent (the
+ *     italic clears and the tab is no longer auto-closed).
+ */
+type WorkspaceDocTab =
+  | { id: string; kind: 'markdown'; path: string; preview?: boolean }
+  | {
+      id: string;
+      kind: 'attachment';
+      attachmentId: string;
+      title?: string;
+      preview?: boolean;
+    };
 
 const PANE_MIN: Record<PaneId, number> = {
   sidebar: 180,
@@ -51,6 +78,18 @@ const PANE_DEFAULT: Record<PaneId, number> = {
   canvas: 720,
   right: 420,
 };
+
+function markdownTabId(path: string): string {
+  return `md:${path}`;
+}
+
+function attachmentTabId(attachmentId: string): string {
+  return `att:${attachmentId}`;
+}
+
+function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).pop() || path || 'Untitled';
+}
 
 function App() {
   const [ready, setReady] = useState(false);
@@ -103,13 +142,40 @@ function ReadyApp() {
   const sidebarCollapsedForMenu = useStore((s) => s.ui.sidebarCollapsed);
   const initialLayoutPreset = useMemo(() => getInitialLayoutPreset(), []);
   const initialMarkdownPath = useMemo(() => getInitialMarkdownPath(), []);
-  const [activeMarkdownPath, setActiveMarkdownPath] = useState<string | null>(
-    initialMarkdownPath,
+  const attachmentsList = useStore((s) => s.attachments);
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceDocTab[]>(() =>
+    initialMarkdownPath
+      ? [
+          {
+            id: markdownTabId(initialMarkdownPath),
+            kind: 'markdown',
+            path: initialMarkdownPath,
+          },
+        ]
+      : [],
+  );
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<string | null>(
+    () => (initialMarkdownPath ? markdownTabId(initialMarkdownPath) : null),
   );
   const [paneWidths, setPaneWidths] =
     useState<Record<PaneId, number>>(PANE_DEFAULT);
   const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number } | null>(
     null,
+  );
+
+  const activeWorkspaceTab = useMemo(() => {
+    if (!workspaceTabs.length) return null;
+    return (
+      workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId) ??
+      workspaceTabs[0]
+    );
+  }, [activeWorkspaceTabId, workspaceTabs]);
+  const activeMarkdownPath =
+    activeWorkspaceTab?.kind === 'markdown' ? activeWorkspaceTab.path : null;
+  const hasWorkspaceTabs = workspaceTabs.length > 0;
+  const attachmentNameById = useMemo(
+    () => new Map(attachmentsList.map((att) => [att.id, att.filename])),
+    [attachmentsList],
   );
 
   const conversationId = useStore((s) => s.settings.lastConversationId);
@@ -125,10 +191,18 @@ function ReadyApp() {
   }, [createConversation, setActiveConversation]);
 
   const [chatPanelState, setChatPanelStateRaw] = useState<PanelState>(() =>
-    initialLayoutPreset === 'canvasFocused' || initialMarkdownPath ? 'hidden' : 'shown',
+    initialMarkdownPath
+      ? 'shown'
+      : initialLayoutPreset === 'canvasFocused'
+        ? 'hidden'
+        : 'shown',
   );
   const [canvasPanelState, setCanvasPanelStateRaw] = useState<PanelState>(() =>
-    initialLayoutPreset === 'chatFocused' || initialMarkdownPath ? 'hidden' : 'shown',
+    initialMarkdownPath
+      ? 'shown'
+      : initialLayoutPreset === 'chatFocused'
+        ? 'hidden'
+        : 'shown',
   );
   const [sidebarPanelState, setSidebarPanelStateRaw] = useState<PanelState>(() =>
     sidebarCollapsedForMenu ? 'hidden' : 'shown',
@@ -137,16 +211,79 @@ function ReadyApp() {
     initialMarkdownPath ? 'shown' : 'hidden',
   );
 
+  const focusOrAddWorkspaceTab = useCallback(
+    (tab: WorkspaceDocTab, opts?: { preview?: boolean }) => {
+      const preview = opts?.preview ?? false;
+      setWorkspaceTabs((tabs) => {
+        if (tabs.some((existing) => existing.id === tab.id)) {
+          // Re-clicking an already-open tab focuses it without changing
+          // its preview state. Title-only refresh kept for attachments.
+          return tabs.map((existing) =>
+            existing.id === tab.id &&
+            existing.kind === 'attachment' &&
+            tab.kind === 'attachment' &&
+            tab.title &&
+            existing.title !== tab.title
+              ? { ...existing, title: tab.title }
+              : existing,
+          );
+        }
+        // New preview tab evicts whatever is currently in the preview
+        // slot. Permanent tabs are left alone.
+        const baseTabs = preview ? tabs.filter((t) => !t.preview) : tabs;
+        return [...baseTabs, { ...tab, preview }];
+      });
+      setActiveWorkspaceTabId(tab.id);
+      setMarkdownPanelState('shown');
+    },
+    [],
+  );
+
+  const promoteWorkspaceTab = useCallback((tabId: string) => {
+    setWorkspaceTabs((tabs) =>
+      tabs.map((tab) =>
+        tab.id === tabId && tab.preview ? { ...tab, preview: false } : tab,
+      ),
+    );
+  }, []);
+
+  const closeWorkspaceTab = useCallback(
+    (tabId: string) => {
+      const index = workspaceTabs.findIndex((tab) => tab.id === tabId);
+      if (index < 0) return;
+      const nextTabs = workspaceTabs.filter((tab) => tab.id !== tabId);
+      setWorkspaceTabs(nextTabs);
+      if (!nextTabs.length) {
+        setActiveWorkspaceTabId(null);
+        setMarkdownPanelState('hidden');
+        return;
+      }
+      if (
+        activeWorkspaceTabId === tabId ||
+        !nextTabs.some((tab) => tab.id === activeWorkspaceTabId)
+      ) {
+        setActiveWorkspaceTabId(
+          nextTabs[Math.min(index, nextTabs.length - 1)]?.id ?? nextTabs[0].id,
+        );
+      }
+    },
+    [activeWorkspaceTabId, workspaceTabs],
+  );
+
+  const closeActiveWorkspaceTab = useCallback(() => {
+    if (activeWorkspaceTab) closeWorkspaceTab(activeWorkspaceTab.id);
+  }, [activeWorkspaceTab, closeWorkspaceTab]);
+
   const setSidebarPanelState = useCallback((state: PanelState) => {
     setSidebarPanelStateRaw(state);
     useStore.getState().setSidebarCollapsed(state !== 'shown');
   }, []);
 
   useEffect(() => {
-    if (initialLayoutPreset === 'main') return;
+    if (initialLayoutPreset === 'main' || initialMarkdownPath) return;
     const timer = window.setTimeout(() => setSidebarPanelState('hidden'), 0);
     return () => window.clearTimeout(timer);
-  }, [initialLayoutPreset, setSidebarPanelState]);
+  }, [initialLayoutPreset, initialMarkdownPath, setSidebarPanelState]);
 
   const setChatPanelState = useCallback((state: PanelState) => {
     setChatPanelStateRaw(state);
@@ -186,20 +323,20 @@ function ReadyApp() {
   }, [setSidebarPanelState, sidebarPanelState]);
 
   const showMarkdown = useCallback(() => {
-    if (activeMarkdownPath) setMarkdownPanelState('shown');
-  }, [activeMarkdownPath]);
+    if (hasWorkspaceTabs) setMarkdownPanelState('shown');
+  }, [hasWorkspaceTabs]);
   const hideMarkdown = useCallback(() => setMarkdownPanelState('hidden'), []);
   const toggleMarkdown = useCallback(() => {
-    if (!activeMarkdownPath) return;
+    if (!hasWorkspaceTabs) return;
     setMarkdownPanelState((state) => (state === 'shown' ? 'hidden' : 'shown'));
-  }, [activeMarkdownPath]);
+  }, [hasWorkspaceTabs]);
 
   const showAllPanels = useCallback(() => {
     showSidebar();
     showCanvas();
     showChat();
-    if (activeMarkdownPath) setMarkdownPanelState('shown');
-  }, [activeMarkdownPath, showCanvas, showChat, showSidebar]);
+    if (hasWorkspaceTabs) setMarkdownPanelState('shown');
+  }, [hasWorkspaceTabs, showCanvas, showChat, showSidebar]);
 
   const openNewChatWindow = useCallback(() => {
     void openChatWindow(ensureConversation());
@@ -208,21 +345,55 @@ function ReadyApp() {
     void openCanvasWorkspaceWindow(ensureConversation());
   }, [ensureConversation]);
   const openCurrentMarkdownWindow = useCallback(() => {
-    if (!activeMarkdownPath) return;
-    void openMarkdownEditorWindow(activeMarkdownPath, conversationId ?? ensureConversation());
-  }, [activeMarkdownPath, conversationId, ensureConversation]);
+    if (activeWorkspaceTab?.kind !== 'markdown') return;
+    void openMarkdownEditorWindow(
+      activeWorkspaceTab.path,
+      conversationId ?? ensureConversation(),
+    );
+  }, [activeWorkspaceTab, conversationId, ensureConversation]);
   const toggleChatTabsAutoHide = useCallback(() => {
     const cur = useStore.getState().settings.chatTabsAutoHide ?? false;
     useStore.getState().setChatTabsAutoHide(!cur);
   }, []);
 
-  const openMarkdownFile = useCallback((path: string) => {
-    setActiveMarkdownPath(path || null);
-    setMarkdownPanelState(path ? 'shown' : 'hidden');
-  }, []);
+  const openMarkdownFile = useCallback(
+    (path: string) => {
+      if (!path) {
+        setWorkspaceTabs([]);
+        setActiveWorkspaceTabId(null);
+        setMarkdownPanelState('hidden');
+        return;
+      }
+      // Single-click opens as preview. Double-click on the tab title
+      // (handled in the tab UI) promotes it.
+      focusOrAddWorkspaceTab(
+        {
+          id: markdownTabId(path),
+          kind: 'markdown',
+          path,
+        },
+        { preview: true },
+      );
+    },
+    [focusOrAddWorkspaceTab],
+  );
+
+  const openAttachmentPreview = useCallback(
+    (attachmentId: string, title?: string) => {
+      focusOrAddWorkspaceTab(
+        {
+          id: attachmentTabId(attachmentId),
+          kind: 'attachment',
+          attachmentId,
+          title,
+        },
+        { preview: true },
+      );
+    },
+    [focusOrAddWorkspaceTab],
+  );
 
   const returnToCanvas = useCallback(() => {
-    setActiveMarkdownPath(null);
     setMarkdownPanelState('hidden');
     showCanvas();
   }, [showCanvas]);
@@ -269,12 +440,22 @@ function ReadyApp() {
   const chatTabsAutoHide = useStore(
     (s) => s.settings.chatTabsAutoHide ?? false,
   );
+  const markdownAutoSave = useStore(
+    (s) => s.settings.markdownAutoSave ?? true,
+  );
   useEffect(() => {
+    void setMenuCheck('file:toggle-auto-save', markdownAutoSave);
     void setMenuCheck('view:show-chat', chatPanelState === 'shown');
     void setMenuCheck('view:show-canvas', canvasPanelState === 'shown');
     void setMenuCheck('view:show-sidebar', sidebarPanelState === 'shown');
     void setMenuCheck('view:toggle-tabs-autohide', chatTabsAutoHide);
-  }, [chatPanelState, canvasPanelState, sidebarPanelState, chatTabsAutoHide]);
+  }, [
+    chatPanelState,
+    canvasPanelState,
+    sidebarPanelState,
+    chatTabsAutoHide,
+    markdownAutoSave,
+  ]);
 
   useEffect(() => {
     function onPanelDetached(e: Event) {
@@ -340,6 +521,25 @@ function ReadyApp() {
   }, [openMarkdownFile]);
 
   useEffect(() => {
+    function onOpenAttachmentPreview(e: Event) {
+      const detail = (e as CustomEvent<{ attachmentId?: string; title?: string }>)
+        .detail;
+      if (detail?.attachmentId) {
+        openAttachmentPreview(detail.attachmentId, detail.title);
+      }
+    }
+    window.addEventListener(
+      'mc:open-attachment-preview',
+      onOpenAttachmentPreview,
+    );
+    return () =>
+      window.removeEventListener(
+        'mc:open-attachment-preview',
+        onOpenAttachmentPreview,
+      );
+  }, [openAttachmentPreview]);
+
+  useEffect(() => {
     if (!layoutMenu) return;
     function close() {
       setLayoutMenu(null);
@@ -356,13 +556,13 @@ function ReadyApp() {
     const panes: PaneId[] = [];
     if (sidebarPanelState === 'shown') panes.push('sidebar');
     if (canvasPanelState === 'shown') panes.push('canvas');
-    if (activeMarkdownPath && markdownPanelState === 'shown') panes.push('markdown');
+    if (hasWorkspaceTabs && markdownPanelState === 'shown') panes.push('markdown');
     if (chatPanelState === 'shown') panes.push('right');
     return panes.length ? panes : ['canvas'];
   }, [
-    activeMarkdownPath,
     canvasPanelState,
     chatPanelState,
+    hasWorkspaceTabs,
     markdownPanelState,
     sidebarPanelState,
   ]);
@@ -386,48 +586,153 @@ function ReadyApp() {
       .join(' ');
   }, [paneWidths, primaryPane, visiblePanes]);
 
+  // Pane splitter drag: keep one active window-level session, and clamp the
+  // delta before writing widths so the 1fr pane cannot absorb overflow and
+  // make a different boundary appear to move.
+  type DragSession = {
+    id: number;
+    pointerId: number;
+    left: PaneId;
+    right: PaneId;
+    primaryPane: PaneId;
+    startX: number;
+    startLeft: number;
+    startRight: number;
+    minDelta: number;
+    maxDelta: number;
+    splitter: HTMLDivElement;
+    ctrl: AbortController;
+  };
+  const dragRef = useRef<DragSession | null>(null);
+  const dragSeqRef = useRef(0);
+
+  const endDragSession = useCallback(() => {
+    const s = dragRef.current;
+    if (!s) return;
+    s.ctrl.abort();
+    s.splitter.classList.remove('dragging');
+    dragRef.current = null;
+  }, []);
+
   function onPaneSplitterPointerDown(
     e: PointerEvent<HTMLDivElement>,
     left: PaneId,
     right: PaneId,
   ) {
+    // Only the primary (left) mouse button starts a drag. Right-click /
+    // middle-click MUST fall through so the workspace's `onContextMenu`
+    // fires and shows the show/hide PanesContextMenu — calling
+    // `preventDefault()` on a non-primary pointerdown suppresses the
+    // contextmenu event in WebKit and was breaking that flow.
+    if (e.button !== 0) return;
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const startX = e.clientX;
-    const startLeft = paneWidths[left];
-    const startRight = paneWidths[right];
+    // Ensure only one drag session is ever live.
+    endDragSession();
+
+    const sessionId = ++dragSeqRef.current;
+    const splitter = e.currentTarget;
+    const leftSlot = splitter.previousElementSibling as HTMLElement | null;
+    const rightSlot = splitter.nextElementSibling as HTMLElement | null;
+    const leftActual = leftSlot?.getBoundingClientRect().width ?? paneWidths[left];
+    const rightActual = rightSlot?.getBoundingClientRect().width ?? paneWidths[right];
+    const startLeft = left === primaryPane ? leftActual : paneWidths[left];
+    const startRight = right === primaryPane ? rightActual : paneWidths[right];
+    const minDelta = PANE_MIN[left] - leftActual;
+    const maxDelta = rightActual - PANE_MIN[right];
+    splitter.classList.add('dragging');
+    const ctrl = new AbortController();
+    const session: DragSession = {
+      id: sessionId,
+      pointerId: e.pointerId,
+      left,
+      right,
+      primaryPane,
+      startX: e.clientX,
+      startLeft,
+      startRight,
+      minDelta,
+      maxDelta,
+      splitter,
+      ctrl,
+    };
+    dragRef.current = session;
+
+    function activeSession(): DragSession | null {
+      const s = dragRef.current;
+      if (!s || s.id !== sessionId) return null;
+      return s;
+    }
 
     function onMove(ev: globalThis.PointerEvent) {
-      const delta = ev.clientX - startX;
+      const s = activeSession();
+      if (!s) return;
+      if (ev.pointerId !== s.pointerId) return;
+      const rawDelta = ev.clientX - s.startX;
+      const delta = Math.max(s.minDelta, Math.min(s.maxDelta, rawDelta));
       setPaneWidths((current) => {
-        if (left === primaryPane && right !== primaryPane) {
+        if (s.left === s.primaryPane && s.right !== s.primaryPane) {
           return {
             ...current,
-            [right]: Math.max(PANE_MIN[right], startRight - delta),
+            [s.right]: Math.max(PANE_MIN[s.right], s.startRight - delta),
           };
         }
-        if (right === primaryPane && left !== primaryPane) {
+        if (s.right === s.primaryPane && s.left !== s.primaryPane) {
           return {
             ...current,
-            [left]: Math.max(PANE_MIN[left], startLeft + delta),
+            [s.left]: Math.max(PANE_MIN[s.left], s.startLeft + delta),
           };
         }
         return {
           ...current,
-          [left]: Math.max(PANE_MIN[left], startLeft + delta),
-          [right]: Math.max(PANE_MIN[right], startRight - delta),
+          [s.left]: Math.max(PANE_MIN[s.left], s.startLeft + delta),
+          [s.right]: Math.max(PANE_MIN[s.right], s.startRight - delta),
         };
       });
     }
 
-    function onUp() {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+    function onEnd(ev: globalThis.PointerEvent | Event) {
+      const s = activeSession();
+      if (!s) return;
+      if (
+        'pointerId' in ev &&
+        typeof ev.pointerId === 'number' &&
+        ev.pointerId !== s.pointerId
+      ) {
+        return;
+      }
+      endDragSession();
     }
 
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp, { once: true });
+    const signal = ctrl.signal;
+    // Use window listeners so the cursor leaving the splitter doesn't
+    // pause the drag. The session ref guards against cross-talk.
+    window.addEventListener('pointermove', onMove, { signal });
+    window.addEventListener('pointerup', onEnd as EventListener, { signal });
+    window.addEventListener(
+      'pointercancel',
+      onEnd as EventListener,
+      { signal },
+    );
+    // Defensive: if the window loses focus / visibility mid-drag, the
+    // OS may swallow the eventual pointerup. End the drag so the next
+    // pointerdown starts cleanly.
+    window.addEventListener('blur', onEnd as EventListener, { signal });
+    document.addEventListener(
+      'visibilitychange',
+      () => {
+        if (document.hidden) onEnd(new Event('visibilitychange'));
+      },
+      { signal },
+    );
   }
+
+  // Belt-and-suspenders: when this component unmounts (e.g., HMR) clean
+  // up any in-flight drag so its listeners don't outlive the React tree.
+  useEffect(() => {
+    return () => {
+      endDragSession();
+    };
+  }, [endDragSession]);
 
   function onWorkspaceContextMenu(e: ReactMouseEvent<HTMLDivElement>) {
     if (e.defaultPrevented) return;
@@ -442,6 +747,14 @@ function ReadyApp() {
     e.preventDefault();
     setLayoutMenu({ x: e.clientX, y: e.clientY });
   }
+
+  const workspaceTabLabel = useCallback(
+    (tab: WorkspaceDocTab) =>
+      tab.kind === 'markdown'
+        ? fileNameFromPath(tab.path)
+        : tab.title ?? attachmentNameById.get(tab.attachmentId) ?? 'Preview',
+    [attachmentNameById],
+  );
 
   const renderPane = (pane: PaneId) => {
     if (pane === 'sidebar') {
@@ -461,12 +774,74 @@ function ReadyApp() {
     if (pane === 'markdown') {
       return (
         <section className="workspace-pane markdown-pane" data-pane="markdown">
-          {activeMarkdownPath ? (
-            <MarkdownDocumentEditor
-              path={activeMarkdownPath}
-              onClose={returnToCanvas}
-              onOpenInWindow={openCurrentMarkdownWindow}
-            />
+          {activeWorkspaceTab ? (
+            <div className="document-workspace">
+              <div
+                className="document-tab-strip"
+                role="tablist"
+                aria-label="Open documents"
+              >
+                {workspaceTabs.map((tab) => {
+                  const active = tab.id === activeWorkspaceTab.id;
+                  const isPreview = tab.preview === true;
+                  return (
+                    <div
+                      key={tab.id}
+                      className={`document-tab${active ? ' active' : ''}${
+                        isPreview ? ' preview' : ''
+                      }`}
+                      role="presentation"
+                    >
+                      <button
+                        type="button"
+                        className="document-tab-pick"
+                        role="tab"
+                        aria-selected={active}
+                        title={
+                          isPreview
+                            ? `${workspaceTabLabel(tab)} — preview (double-click to keep open)`
+                            : workspaceTabLabel(tab)
+                        }
+                        onClick={() => setActiveWorkspaceTabId(tab.id)}
+                        onDoubleClick={() => promoteWorkspaceTab(tab.id)}
+                      >
+                        <span className="document-tab-kind">
+                          {tab.kind === 'markdown' ? 'MD' : 'FILE'}
+                        </span>
+                        <span className="document-tab-title">
+                          {workspaceTabLabel(tab)}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="document-tab-close"
+                        aria-label={`Close ${workspaceTabLabel(tab)}`}
+                        title="Close tab"
+                        onClick={() => closeWorkspaceTab(tab.id)}
+                      >
+                        x
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="document-tab-content">
+                {activeWorkspaceTab.kind === 'markdown' ? (
+                  <MarkdownDocumentEditor
+                    key={activeWorkspaceTab.id}
+                    path={activeWorkspaceTab.path}
+                    onClose={closeActiveWorkspaceTab}
+                    onOpenInWindow={openCurrentMarkdownWindow}
+                  />
+                ) : (
+                  <AttachmentPreview
+                    key={activeWorkspaceTab.id}
+                    attachmentId={activeWorkspaceTab.attachmentId}
+                    displayName={activeWorkspaceTab.title}
+                  />
+                )}
+              </div>
+            </div>
           ) : null}
         </section>
       );
@@ -476,13 +851,9 @@ function ReadyApp() {
         <section className="workspace-pane right-pane-shell" data-pane="right">
           <RightPane
             panelState={chatPanelState}
+            paneMenuItems={paneMenu}
             onShow={showChat}
             onHide={hideChat}
-            onClose={hideChat}
-            onDetach={() => {
-              void openChatWindow(ensureConversation());
-              hideChat();
-            }}
           />
         </section>
       );
@@ -491,29 +862,11 @@ function ReadyApp() {
       <section className="workspace-pane canvas-shell" data-pane="canvas">
         <div className="pane-toolbar canvas-toolbar">
           <ViewModeToggle />
-          <button
-            type="button"
-            onClick={() => {
-              void openCanvasWorkspaceWindow(conversationId ?? ensureConversation());
-              hideCanvas();
-            }}
-            aria-label="Open canvas in new window"
-            title="Open canvas in new window (⌘⌥T)"
-          >
-            ⧉
-          </button>
-          <button
-            type="button"
-            onClick={hideCanvas}
-            aria-label="Hide canvas"
-            title="Hide canvas"
-          >
-            ×
-          </button>
         </div>
         <CanvasPanel
           canvasPanelState={canvasPanelState}
           chatPanelState={chatPanelState}
+          paneMenuItems={paneMenu}
           onShowCanvas={showCanvas}
           onHideCanvas={hideCanvas}
           onShowChat={showChat}
@@ -523,7 +876,7 @@ function ReadyApp() {
     );
   };
 
-  const paneMenu = [
+  const paneMenu: PaneMenuControl[] = [
     {
       id: 'sidebar' as const,
       label: 'Chat history / File explorer',
@@ -542,11 +895,11 @@ function ReadyApp() {
     },
     {
       id: 'markdown' as const,
-      label: 'Markdown editor',
-      shown: Boolean(activeMarkdownPath && markdownPanelState === 'shown'),
+      label: 'Document tabs',
+      shown: Boolean(hasWorkspaceTabs && markdownPanelState === 'shown'),
       show: showMarkdown,
       hide: hideMarkdown,
-      canShow: Boolean(activeMarkdownPath),
+      canShow: hasWorkspaceTabs,
     },
     {
       id: 'right' as const,
@@ -594,39 +947,13 @@ function ReadyApp() {
       </div>
 
       {layoutMenu ? (
-        <div
-          className="workspace-layout-menu"
-          style={{ left: layoutMenu.x, top: layoutMenu.y }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <div className="workspace-layout-menu-title">Panes</div>
-          {paneMenu.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              disabled={!item.canShow && !item.shown}
-              onClick={() => {
-                if (item.shown) item.hide();
-                else item.show();
-                setLayoutMenu(null);
-              }}
-            >
-              <span>{item.shown ? 'Hide' : 'Show'}</span>
-              <strong>{item.label}</strong>
-            </button>
-          ))}
-          <hr />
-          <button
-            type="button"
-            onClick={() => {
-              showAllPanels();
-              setLayoutMenu(null);
-            }}
-          >
-            <span>Show</span>
-            <strong>All panes</strong>
-          </button>
-        </div>
+        <PanesContextMenu
+          x={layoutMenu.x}
+          y={layoutMenu.y}
+          items={paneMenu}
+          onShowAll={showAllPanels}
+          onClose={() => setLayoutMenu(null)}
+        />
       ) : null}
       <SettingsModal />
       <SearchPalette />
@@ -634,6 +961,8 @@ function ReadyApp() {
       <ShortcutsModal />
       <QuickCapture />
       <AIPalette />
+      <GraphImportModal />
+      <WorkspaceConfigModal />
       <PdfViewer />
       <Onboarding />
     </div>

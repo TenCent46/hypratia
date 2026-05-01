@@ -123,7 +123,7 @@ const ANTHROPIC_MODELS: Record<string, ModelMeta> = {
   'claude-opus-4-7': {
     id: 'claude-opus-4-7',
     label: 'Claude Opus 4.7',
-    capabilities: ['text', 'vision', 'thinking'],
+    capabilities: ['text', 'vision', 'thinking', 'web_search'],
     inputUsdPer1M: 15,
     cachedInputUsdPer1M: 1.5,
     outputUsdPer1M: 75,
@@ -132,7 +132,7 @@ const ANTHROPIC_MODELS: Record<string, ModelMeta> = {
   'claude-opus-4-7-1m': {
     id: 'claude-opus-4-7-1m',
     label: 'Claude Opus 4.7 (1M context)',
-    capabilities: ['text', 'vision', 'thinking'],
+    capabilities: ['text', 'vision', 'thinking', 'web_search'],
     inputUsdPer1M: 18,
     cachedInputUsdPer1M: 1.8,
     outputUsdPer1M: 90,
@@ -141,7 +141,7 @@ const ANTHROPIC_MODELS: Record<string, ModelMeta> = {
   'claude-sonnet-4-6': {
     id: 'claude-sonnet-4-6',
     label: 'Claude Sonnet 4.6',
-    capabilities: ['text', 'vision', 'thinking'],
+    capabilities: ['text', 'vision', 'thinking', 'web_search'],
     inputUsdPer1M: 3,
     cachedInputUsdPer1M: 0.3,
     outputUsdPer1M: 15,
@@ -150,7 +150,7 @@ const ANTHROPIC_MODELS: Record<string, ModelMeta> = {
   'claude-haiku-4-5': {
     id: 'claude-haiku-4-5',
     label: 'Claude Haiku 4.5',
-    capabilities: ['text', 'vision', 'thinking'],
+    capabilities: ['text', 'vision', 'thinking', 'web_search'],
     inputUsdPer1M: 1,
     cachedInputUsdPer1M: 0.1,
     outputUsdPer1M: 5,
@@ -229,7 +229,7 @@ const GOOGLE_MODELS: Record<string, ModelMeta> = {
   'gemini-2.5-pro': {
     id: 'gemini-2.5-pro',
     label: 'Gemini 2.5 Pro',
-    capabilities: ['text', 'vision', 'thinking', 'audio'],
+    capabilities: ['text', 'vision', 'thinking', 'audio', 'web_search'],
     inputUsdPer1M: 1.25,
     outputUsdPer1M: 10,
     contextWindow: 2000000,
@@ -237,7 +237,7 @@ const GOOGLE_MODELS: Record<string, ModelMeta> = {
   'gemini-2.5-flash': {
     id: 'gemini-2.5-flash',
     label: 'Gemini 2.5 Flash',
-    capabilities: ['text', 'vision', 'thinking', 'audio'],
+    capabilities: ['text', 'vision', 'thinking', 'audio', 'web_search'],
     inputUsdPer1M: 0.3,
     outputUsdPer1M: 2.5,
     contextWindow: 1000000,

@@ -1,5 +1,11 @@
-import { memo, useRef, useState, type WheelEvent } from 'react';
-import { NodeResizer, type Node, type NodeProps } from '@xyflow/react';
+import { memo, useCallback, useRef, useState } from 'react';
+import type { WheelEvent } from 'react';
+import {
+  NodeResizer,
+  useReactFlow,
+  type Node,
+  type NodeProps,
+} from '@xyflow/react';
 import { MarkdownRenderer } from '../../services/markdown/MarkdownRenderer';
 import { NodeHandles } from './NodeHandles';
 import { useStore } from '../../store';
@@ -65,15 +71,8 @@ function titleFromMarkdown(markdown: string, fallback: string): string {
   return first || fallback || 'Untitled';
 }
 
-// Keep the canvas's pinch-to-zoom and Cmd/Ctrl+wheel zoom working over a
-// node body. Trackpad pinch arrives as a wheel event with ctrlKey synthesized
-// by the browser; Cmd-wheel sets metaKey. Both bubble to React Flow when we
-// don't stop them. Plain wheels are stopped so the body's native scroll runs
-// without the canvas also panning/zooming.
-function bodyWheelHandler(e: WheelEvent<HTMLElement>) {
-  if (e.ctrlKey || e.metaKey) return;
-  e.stopPropagation();
-}
+const MIN_ZOOM = 0.01;
+const MAX_ZOOM = 100;
 
 function MarkdownNodeImpl({
   id,
@@ -88,6 +87,35 @@ function MarkdownNodeImpl({
   const [draft, setDraft] = useState(data.contentMarkdown);
   const cancelBlurSaveRef = useRef(false);
   const markers = data.markers ?? [];
+  const flow = useReactFlow();
+
+  // Body wheel handler. The body has the `nowheel` class so React Flow's
+  // own pan/zoom logic ignores wheel events that originate inside it,
+  // restoring native overflow scroll. The downside is that pinch and
+  // Cmd/Ctrl-wheel ALSO get ignored (they normally trigger zoom); we
+  // replay them here as a programmatic focal-point zoom.
+  const bodyWheel = useCallback(
+    (e: WheelEvent<HTMLElement>) => {
+      if (!(e.ctrlKey || e.metaKey)) return; // plain wheel: native scroll
+      e.preventDefault();
+      const container = (e.currentTarget.closest(
+        '.react-flow',
+      ) as HTMLElement | null)?.getBoundingClientRect();
+      if (!container) return;
+      const mx = e.clientX - container.left;
+      const my = e.clientY - container.top;
+      const vp = flow.getViewport();
+      const factor = Math.exp(-e.deltaY * 0.01);
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, vp.zoom * factor));
+      const ratio = newZoom / vp.zoom;
+      flow.setViewport({
+        x: mx * (1 - ratio) + vp.x * ratio,
+        y: my * (1 - ratio) + vp.y * ratio,
+        zoom: newZoom,
+      });
+    },
+    [flow],
+  );
 
   async function saveDraft(nextMarkdown = draft) {
     const rootPath = await resolveMarkdownRoot(useStore.getState().settings.markdownStorageDir);
@@ -136,13 +164,13 @@ function MarkdownNodeImpl({
         </div>
         {editing ? (
           <textarea
-            className="markdown-node-editor nodrag"
+            className="markdown-node-editor nodrag nowheel"
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            onWheel={bodyWheelHandler}
+            onWheel={bodyWheel}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                 e.preventDefault();
@@ -163,8 +191,8 @@ function MarkdownNodeImpl({
           />
         ) : (
           <div
-            className="content markdown-node-body nodrag"
-            onWheel={bodyWheelHandler}
+            className="content markdown-node-body nodrag nowheel"
+            onWheel={bodyWheel}
           >
             <div className="markdown-node-content" data-node-id={id}>
               <MarkdownRenderer

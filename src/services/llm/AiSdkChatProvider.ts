@@ -24,6 +24,12 @@ import type {
 } from './ChatProvider';
 import type { ProviderId } from '../../types';
 
+/** Providers we can attach a native web-search tool to. */
+type WebSearchProvider = 'anthropic' | 'openai' | 'google';
+function supportsWebSearch(provider: ProviderId): provider is WebSearchProvider {
+  return provider === 'anthropic' || provider === 'openai' || provider === 'google';
+}
+
 type JSONValue =
   | string
   | number
@@ -63,12 +69,18 @@ async function resolveModel(
   provider: ProviderId,
   modelId: string,
   baseUrl?: string,
+  useResponsesApi = false,
 ): Promise<LanguageModel> {
   const meta = PROVIDERS[provider];
   switch (provider) {
     case 'openai': {
       const apiKey = (await secrets.get(SECRET_KEY('openai'))) ?? '';
-      return createOpenAI({ apiKey })(modelId);
+      const openai = createOpenAI({ apiKey });
+      // Web search lives behind the Responses API. When the caller wants
+      // it active, use `.responses(modelId)` to get a Responses-flavoured
+      // LanguageModel; otherwise stick with the chat-completions flavour
+      // so existing flows (no tools / artifact tools) keep working.
+      return useResponsesApi ? openai.responses(modelId) : openai(modelId);
     }
     case 'anthropic': {
       const apiKey = (await secrets.get(SECRET_KEY('anthropic'))) ?? '';
@@ -109,15 +121,57 @@ async function resolveModel(
   }
 }
 
+/**
+ * Build the provider-native web-search tool for the active request.
+ * Returns `null` when web search isn't requested or when the provider
+ * has no native tool we can attach. Caller merges the result into the
+ * existing function-tool set.
+ */
+async function buildWebSearchTools(
+  req: ChatRequest,
+): Promise<Record<string, unknown> | null> {
+  if (!req.webSearch) return null;
+  if (!supportsWebSearch(req.provider)) return null;
+  switch (req.provider) {
+    case 'anthropic': {
+      // Lazy import so non-Anthropic flows don't pay the bundle cost.
+      const { anthropic } = await import('@ai-sdk/anthropic');
+      return { web_search: anthropic.tools.webSearch_20250305({}) };
+    }
+    case 'openai': {
+      const { openai } = await import('@ai-sdk/openai');
+      // The Responses-API web-search tool is registered under the same
+      // name the API expects so the model can call it.
+      return { web_search: openai.tools.webSearch({}) };
+    }
+    case 'google': {
+      const { google } = await import('@ai-sdk/google');
+      // Google enforces the tool name `google_search`.
+      return { google_search: google.tools.googleSearch({}) };
+    }
+  }
+}
+
 export class AiSdkChatProvider implements ChatProvider {
   async *stream(
     req: ChatRequest,
     signal?: AbortSignal,
   ): AsyncIterable<ChatChunk> {
-    const provider = await resolveModel(req.provider, req.model);
-    const tools = req.conversationId
-      ? ((await buildTools(req.conversationId)) as ToolSet)
-      : undefined;
+    const useResponsesApi = req.webSearch === true && req.provider === 'openai';
+    const dropForGoogleSearch = req.webSearch === true && req.provider === 'google';
+    const provider = await resolveModel(
+      req.provider,
+      req.model,
+      undefined,
+      useResponsesApi,
+    );
+    const fnTools = req.conversationId
+      ? await buildTools(req.conversationId, { dropForGoogleSearch })
+      : {};
+    const webTools = (await buildWebSearchTools(req)) ?? {};
+    const merged = { ...fnTools, ...webTools };
+    const tools =
+      Object.keys(merged).length > 0 ? (merged as ToolSet) : undefined;
     const result = streamText({
       model: provider,
       messages: req.messages as ModelMessage[],
@@ -146,10 +200,21 @@ export class AiSdkChatProvider implements ChatProvider {
   }
 
   async complete(req: ChatRequest, signal?: AbortSignal): Promise<ChatResult> {
-    const provider = await resolveModel(req.provider, req.model);
-    const tools = req.conversationId
-      ? ((await buildTools(req.conversationId)) as ToolSet)
-      : undefined;
+    const useResponsesApi = req.webSearch === true && req.provider === 'openai';
+    const dropForGoogleSearch = req.webSearch === true && req.provider === 'google';
+    const provider = await resolveModel(
+      req.provider,
+      req.model,
+      undefined,
+      useResponsesApi,
+    );
+    const fnTools = req.conversationId
+      ? await buildTools(req.conversationId, { dropForGoogleSearch })
+      : {};
+    const webTools = (await buildWebSearchTools(req)) ?? {};
+    const merged = { ...fnTools, ...webTools };
+    const tools =
+      Object.keys(merged).length > 0 ? (merged as ToolSet) : undefined;
     const result = await generateText({
       model: provider,
       messages: req.messages as ModelMessage[],

@@ -4,12 +4,17 @@ import {
   AppContextMenuItem as Item,
   AppContextMenuSeparator as Separator,
 } from '../ContextMenu/AppContextMenuItem';
+import {
+  PaneMenuSubmenu,
+  type PaneMenuControl,
+} from '../PanesContextMenu/PanesContextMenu';
 
 export type CanvasPanelContextMenuProps = {
   x: number;
   y: number;
   canvasPanelState?: 'shown' | 'hidden';
   chatPanelState?: 'shown' | 'hidden';
+  paneMenuItems?: PaneMenuControl[];
   canvasTool: CanvasTool;
   hasSelection: boolean;
   hasNodes: boolean;
@@ -29,6 +34,7 @@ export function CanvasPanelContextMenu({
   y,
   canvasPanelState = 'shown',
   chatPanelState = 'shown',
+  paneMenuItems,
   canvasTool,
   hasSelection,
   hasNodes,
@@ -94,40 +100,49 @@ export function CanvasPanelContextMenu({
       style={{ left: pos.x, top: pos.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <Item
-        onClick={() => {
-          onShowCanvas?.();
-          onClose();
-        }}
-        label="Show Canvas"
-        checked={canvasPanelState === 'shown'}
-      />
-      <Item
-        onClick={() => {
-          onHideCanvas?.();
-          onClose();
-        }}
-        label="Hide Canvas"
-        checked={canvasPanelState === 'hidden'}
-      />
-      <Separator />
-      <Item
-        onClick={() => {
-          onShowChat?.();
-          onClose();
-        }}
-        label="Show Chat"
-        checked={chatPanelState === 'shown'}
-      />
-      <Item
-        onClick={() => {
-          onHideChat?.();
-          onClose();
-        }}
-        label="Hide Chat"
-        checked={chatPanelState === 'hidden'}
-      />
-      <Separator />
+      {paneMenuItems ? (
+        <>
+          <PaneMenuSubmenu items={paneMenuItems} onSelect={onClose} />
+          <Separator />
+        </>
+      ) : (
+        <>
+          <Item
+            onClick={() => {
+              onShowCanvas?.();
+              onClose();
+            }}
+            label="Show Canvas"
+            checked={canvasPanelState === 'shown'}
+          />
+          <Item
+            onClick={() => {
+              onHideCanvas?.();
+              onClose();
+            }}
+            label="Hide Canvas"
+            checked={canvasPanelState === 'hidden'}
+          />
+          <Separator />
+          <Item
+            onClick={() => {
+              onShowChat?.();
+              onClose();
+            }}
+            label="Show Chat"
+            checked={chatPanelState === 'shown'}
+          />
+          <Item
+            onClick={() => {
+              onHideChat?.();
+              onClose();
+            }}
+            label="Hide Chat"
+            checked={chatPanelState === 'hidden'}
+          />
+          <Separator />
+        </>
+      )}
       <Item
         onClick={() => {
           onResetView();

@@ -56,7 +56,20 @@ export type Message = {
   attachmentIds?: ID[];
 };
 
-export type CanvasNodeKind = 'markdown' | 'image' | 'pdf' | 'artifact';
+export type CanvasNodeKind =
+  | 'markdown'
+  | 'image'
+  | 'pdf'
+  | 'artifact'
+  | 'theme';
+
+/**
+ * Sub-classification stored on a `theme`-kind node via the `themeKind:<v>` tag.
+ * - `theme` is a parent root for an ask cluster.
+ * - `ask` is a user message converted into a child node.
+ * - `insight` / `decision` are user-pinned assistant replies.
+ */
+export type ThemeKind = 'theme' | 'ask' | 'insight' | 'decision';
 
 export type CanvasSelectionMarker = {
   markerId: ID;
@@ -90,15 +103,26 @@ export type CanvasNode = {
   /** User-editable frontmatter (free-form keys merged into exported YAML). */
   frontmatter?: Record<string, unknown>;
   selectionMarkers?: CanvasSelectionMarker[];
+  /**
+   * Conversation-map linkage. For `theme`-kind nodes: the root node's id (or
+   * its own id for a theme root). Lets siblings under the same theme cluster.
+   */
+  themeId?: ID;
+  /** 1 (low) … 5 (high). Drives the importance dot on theme nodes. */
+  importance?: 1 | 2 | 3 | 4 | 5;
   createdAt: string;
   updatedAt: string;
 };
+
+export type EdgeKind = 'parent' | 'related';
 
 export type Edge = {
   id: ID;
   sourceNodeId: ID;
   targetNodeId: ID;
   label?: string;
+  /** Conversation-map edge taxonomy. Untyped edges keep legacy rendering. */
+  kind?: EdgeKind;
   createdAt: string;
 };
 
@@ -194,6 +218,13 @@ export type Settings = {
    */
   recentlyClosedConversations?: RecentlyClosedConversation[];
   /**
+   * Conversation ids hidden from the inline chat tab bar (the "×" button
+   * on a tab). Hiding is non-destructive — the chat history stays in the
+   * library, the conversation is still listed in the sidebar, and
+   * activating it (from the sidebar or command palette) restores its tab.
+   */
+  hiddenChatTabIds?: ID[];
+  /**
    * Artifact generation pipeline preferences. See
    * docs/specs/17-artifact-generation-pipeline.md.
    */
@@ -202,9 +233,49 @@ export type Settings = {
    * Knowledge Base editor mode. Default `live-preview`. See spec 21.
    */
   editorMode?: EditorMode;
+  /**
+   * Markdown editor auto save. Default true; users can opt out from Settings
+   * or the macOS File menu.
+   */
+  markdownAutoSave?: boolean;
+  /**
+   * When true, conversations that are not assigned to a project are not
+   * mirrored into the Knowledge Base. Project conversations still mirror.
+   */
+  incognitoUnprojectedChats?: boolean;
+  /**
+   * Set to `true` after the user clicks "Don't show again" on the
+   * "this message is already on the canvas" notification. Suppresses
+   * the toast on subsequent duplicate drops; the message is still not
+   * re-added (the duplicate is silently ignored).
+   */
+  suppressDuplicateChatNodeWarning?: boolean;
+  /**
+   * Canvas wheel behavior. `pan` (default) makes wheel scroll/pan the
+   * canvas with Cmd/Ctrl-wheel and pinch zooming. `zoom` makes plain
+   * wheel zoom the canvas (Figma-like). Toggle with the S keyboard
+   * shortcut. See spec 32.
+   */
+  canvasWheelMode?: 'pan' | 'zoom';
+  /**
+   * Conversation-map theme classifier. `auto` (default) uses the LLM
+   * when an API key is configured, falling back to heuristics
+   * otherwise. `heuristic` and `llm` force a single mode. See spec 32.
+   */
+  themesClassifier?: 'auto' | 'heuristic' | 'llm';
 };
 
-export type EditorMode = 'live-preview' | 'source' | 'reading';
+/**
+ * Knowledge Base editor mode.
+ *
+ * The legacy enum included `source` (raw markdown view) and `reading`
+ * (rendered HTML view). Both were removed when Live Preview became the
+ * only editor; the alias is kept for backwards compatibility with
+ * persisted Settings and event payloads — code may still hand us those
+ * strings, but they are coerced to `live-preview` at the consumer.
+ */
+export type EditorMode = 'live-preview';
+export type LegacyEditorMode = 'live-preview' | 'source' | 'reading';
 
 export type ArtifactSettings = {
   documentProvider?: 'claude' | 'openai';

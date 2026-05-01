@@ -3,6 +3,9 @@ import { useStore } from '../../store';
 import { chat } from '../../services/llm';
 import { attachments as attachmentsService } from '../../services/attachments';
 import { drainPendingArtifacts } from '../../services/artifacts';
+import { autoTitleConversation } from '../../services/chat/autoTitle';
+import { readProjectKnowledgeContext } from '../../services/knowledge/projectKnowledge';
+import { pickClassifier } from '../../services/themes';
 import type {
   ChatMessage,
   ChatPart,
@@ -21,14 +24,34 @@ export type SendContextOptions = {
   };
 };
 
-function modeSystemPrompt(mode: ChatMode): string | null {
+function modeSystemPrompt(
+  mode: ChatMode,
+  webSearchAvailable: boolean,
+): string | null {
   if (mode === 'search') {
-    return 'Search mode is selected. If live web search tools are unavailable in this local desktop build, say that clearly. Do not imply that you browsed the web or fabricate citations.';
+    return webSearchAvailable
+      ? 'Search mode is selected. Use the web_search tool to look up current information whenever the answer benefits from up-to-date sources, then cite the URLs you used in your reply.'
+      : 'Search mode is selected. The selected model does not have a web search tool wired in this build, so say that clearly. Do not imply that you browsed the web or fabricate citations.';
   }
   if (mode === 'deep_search') {
-    return 'Deep search mode is selected. Produce a structured research brief with research plan, key findings, uncertainties, and suggested source queries. If live web search tools are unavailable, say that clearly and do not fabricate citations.';
+    return webSearchAvailable
+      ? 'Deep search mode is selected. Run multiple web_search calls to triangulate sources, then produce a structured research brief with research plan, key findings, uncertainties, and citations. Cite the URLs you actually retrieved.'
+      : 'Deep search mode is selected. The selected model does not have a web search tool wired, so say that clearly and do not fabricate citations. Produce a structured research brief from prior knowledge with research plan, key findings, uncertainties, and suggested source queries.';
   }
   return null;
+}
+
+function webSearchAvailableFor(model: ModelRef | undefined): boolean {
+  if (!model) return false;
+  if (
+    model.provider !== 'anthropic' &&
+    model.provider !== 'openai' &&
+    model.provider !== 'google'
+  ) {
+    return false;
+  }
+  const meta = getModelMeta(model.provider, model.model);
+  return Boolean(meta?.capabilities?.includes('web_search'));
 }
 
 const ARTIFACT_TOOL_POLICY = [
@@ -41,6 +64,134 @@ const ARTIFACT_TOOL_POLICY = [
   'After a successful tool call, give a short chat summary of what was generated; the file itself is already attached.',
   'Do not force file generation for short / conversational answers. Use tools only when the user clearly wants a file or the output is meaningfully better as a file.',
 ].join('\n');
+
+/**
+ * Pick a free position for a brand-new theme root in the given conversation.
+ * Lays roots out left-to-right in a column-like row; each row starts at y=200
+ * so theme roots stay above their ask children.
+ */
+function placeNewThemeRoot(
+  existing: ReadonlyArray<{
+    conversationId: ID;
+    kind?: string;
+    position: { x: number; y: number };
+    tags: string[];
+  }>,
+  conversationId: ID,
+): { x: number; y: number } {
+  const roots = existing.filter(
+    (n) =>
+      n.conversationId === conversationId &&
+      n.kind === 'theme' &&
+      (n.tags ?? []).includes('themeKind:theme'),
+  );
+  if (roots.length === 0) return { x: 200, y: 200 };
+  const rightmost = roots.reduce((acc, n) =>
+    n.position.x > acc.position.x ? n : acc,
+  );
+  return { x: rightmost.position.x + 280, y: 200 };
+}
+
+/**
+ * Place an ask child below the lowest existing child of the given theme; if
+ * the theme has no children yet, drop it 120px under the theme root.
+ */
+function placeAskChild(
+  existing: ReadonlyArray<{
+    id: ID;
+    themeId?: ID;
+    position: { x: number; y: number };
+  }>,
+  themeRoot: { id: ID; position: { x: number; y: number } },
+): { x: number; y: number } {
+  const siblings = existing.filter((n) => n.themeId === themeRoot.id);
+  if (siblings.length === 0) {
+    return { x: themeRoot.position.x, y: themeRoot.position.y + 120 };
+  }
+  const lowest = siblings.reduce((acc, n) =>
+    n.position.y > acc.position.y ? n : acc,
+  );
+  return { x: themeRoot.position.x, y: lowest.position.y + 90 };
+}
+
+/**
+ * Conversation-map mint: classify the user message, ensure a theme root
+ * exists, and add an `ask` child node + parent edge. Best-effort; never
+ * throws. See spec 32.
+ */
+async function mintAskNode(
+  messageId: ID,
+  conversationId: ID,
+  message: string,
+  model: ModelRef | undefined,
+): Promise<void> {
+  const state = useStore.getState();
+  const settings = state.settings;
+  const allNodes = state.nodes;
+  const themeRoots = allNodes.filter(
+    (n) =>
+      n.conversationId === conversationId &&
+      n.kind === 'theme' &&
+      (n.tags ?? []).includes('themeKind:theme'),
+  );
+  const classifier = await pickClassifier(settings, model);
+  const classified = await classifier.classify({
+    conversationId,
+    message,
+    recentThemes: themeRoots.slice(-8).map((n) => ({
+      id: n.id,
+      title: n.title,
+      contentMarkdown: n.contentMarkdown,
+      tags: n.tags,
+    })),
+    model,
+  });
+
+  // Resolve the theme root.
+  let themeRootId: ID;
+  let themeRootNode = classified.themeId
+    ? allNodes.find((n) => n.id === classified.themeId)
+    : undefined;
+  if (!themeRootNode) {
+    const pos = placeNewThemeRoot(allNodes, conversationId);
+    themeRootNode = useStore.getState().addNode({
+      conversationId,
+      kind: 'theme',
+      title: classified.themeTitle,
+      contentMarkdown: classified.themeTitle,
+      position: pos,
+      tags: ['themeKind:theme'],
+      importance: classified.importance,
+    });
+    themeRootId = themeRootNode.id;
+    // The root's themeId is its own id so children can cluster around it.
+    useStore.getState().updateNode(themeRootId, { themeId: themeRootId });
+  } else {
+    themeRootId = themeRootNode.id;
+  }
+
+  // Place the ask under the theme root.
+  const askPos = placeAskChild(
+    useStore.getState().nodes,
+    { id: themeRootId, position: themeRootNode.position },
+  );
+  const askNode = useStore.getState().addNode({
+    conversationId,
+    kind: 'theme',
+    title: classified.askSummary,
+    contentMarkdown: classified.askSummary,
+    sourceMessageId: messageId,
+    position: askPos,
+    tags: [`themeKind:${classified.themeKind}`],
+    themeId: themeRootId,
+    importance: classified.importance,
+  });
+  useStore.getState().addEdge({
+    sourceNodeId: themeRootId,
+    targetNodeId: askNode.id,
+    kind: 'parent',
+  });
+}
 
 async function buildUserContent(
   text: string,
@@ -100,6 +251,7 @@ export function useChatStream() {
       opts?: {
         thinking?: { enabled: boolean; budgetTokens?: number };
         reasoningEffort?: ReasoningEffort;
+        webSearch?: boolean;
       },
     ) => {
       const placeholder = addStreaming(conversationId, model);
@@ -117,6 +269,7 @@ export function useChatStream() {
             thinking: opts?.thinking,
             reasoningEffort: opts?.reasoningEffort,
             conversationId,
+            webSearch: opts?.webSearch,
           },
           controller.signal,
         )) {
@@ -142,9 +295,15 @@ export function useChatStream() {
           Object.keys(patch).length > 0 ? patch : undefined,
         );
         if (usage) addUsage(conversationId, usage);
+        void autoTitleConversation(conversationId).catch((err) => {
+          console.warn('[chat] auto title failed', err);
+        });
       } catch (err) {
         const m = err instanceof Error ? err.message : String(err);
         errorMsg(placeholder.id, m);
+        void autoTitleConversation(conversationId).catch((titleErr) => {
+          console.warn('[chat] auto title failed', titleErr);
+        });
       } finally {
         setStreaming(false);
         abortRef.current = null;
@@ -168,12 +327,19 @@ export function useChatStream() {
         conv?.modelOverride ?? settings.defaultModel;
 
       // Always log the user's message, even if no model is configured
-      addMessage(
+      const userMsg = addMessage(
         conversationId,
         'user',
         trimmed,
         attachmentIds,
         context?.contextSummary,
+      );
+      // Conversation-map: classify the ask and mint a node + edge in the
+      // background so the chat send isn't blocked.
+      void mintAskNode(userMsg.id, conversationId, trimmed, model).catch(
+        (err) => {
+          console.warn('[themes] mintAskNode failed', err);
+        },
       );
 
       if (!model) {
@@ -183,13 +349,21 @@ export function useChatStream() {
           'system',
           '_(No AI provider configured. Add one in Settings to enable streaming responses.)_',
         );
+        void autoTitleConversation(conversationId).catch((err) => {
+          console.warn('[chat] auto title failed', err);
+        });
         return;
       }
 
       const sysPrompt = conv?.systemPrompt ?? settings.systemPrompt;
-      const modePrompt = modeSystemPrompt(mode);
+      const webSearchActive =
+        (mode === 'search' || mode === 'deep_search') &&
+        webSearchAvailableFor(model);
+      const modePrompt = modeSystemPrompt(mode, webSearchActive);
+      const projectContext = await readProjectKnowledgeContext(conv?.projectId);
       const history: ChatMessage[] = [];
       if (sysPrompt) history.push({ role: 'system', content: sysPrompt });
+      if (projectContext) history.push({ role: 'system', content: projectContext });
       if (modePrompt) history.push({ role: 'system', content: modePrompt });
       history.push({ role: 'system', content: ARTIFACT_TOOL_POLICY });
       if (context?.systemContext) {
@@ -221,6 +395,7 @@ export function useChatStream() {
       await streamAssistant(conversationId, model, history, {
         thinking: useThinking ? conv?.thinking : undefined,
         reasoningEffort,
+        webSearch: webSearchActive,
       });
     },
     [
@@ -248,7 +423,10 @@ export function useChatStream() {
         .filter((m) => m.conversationId === assistant.conversationId && !m.errored);
       const history: ChatMessage[] = [];
       const sysPrompt = conv?.systemPrompt ?? settings.systemPrompt;
-      const modePrompt = modeSystemPrompt(mode);
+      const webSearchActive =
+        (mode === 'search' || mode === 'deep_search') &&
+        webSearchAvailableFor(model);
+      const modePrompt = modeSystemPrompt(mode, webSearchActive);
       if (sysPrompt) history.push({ role: 'system', content: sysPrompt });
       if (modePrompt) history.push({ role: 'system', content: modePrompt });
       history.push({ role: 'system', content: ARTIFACT_TOOL_POLICY });
@@ -257,7 +435,9 @@ export function useChatStream() {
         history.push({ role: m.role, content: m.content });
       }
       if (!history.some((m) => m.role === 'user')) return;
-      await streamAssistant(assistant.conversationId, model, history);
+      await streamAssistant(assistant.conversationId, model, history, {
+        webSearch: webSearchActive,
+      });
     },
     [messages, conversations, settings, streamAssistant],
   );

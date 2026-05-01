@@ -612,8 +612,8 @@ fn list_detached_windows(
 
 /// Set the check state of a registered menu item. Frontend calls this when a
 /// store value relevant to the macOS menu changes (Show Chat, Show Canvas,
-/// Show Sidebar, Auto-Hide Chat Tabs). Unknown ids are silently ignored so
-/// front-end and back-end can ship slightly out of sync.
+/// Show Sidebar, Auto Save, Auto-Hide Chat Tabs). Unknown ids are silently
+/// ignored so front-end and back-end can ship slightly out of sync.
 #[tauri::command]
 fn set_menu_check(
     state: State<'_, CheckableMenuItems>,
@@ -699,6 +699,10 @@ pub fn run() {
                 .id("file:open-folder")
                 .accelerator("CmdOrCtrl+Shift+O")
                 .build(handle)?;
+            let auto_save = CheckMenuItemBuilder::new("Auto Save")
+                .id("file:toggle-auto-save")
+                .checked(true)
+                .build(handle)?;
             let detach_chat = MenuItemBuilder::new("Open Chat in New Window")
                 .id("file:detach-chat")
                 .build(handle)?;
@@ -710,6 +714,8 @@ pub fn run() {
                 .item(&new_project)
                 .separator()
                 .item(&open_folder)
+                .separator()
+                .item(&auto_save)
                 .separator()
                 .item(&detach_chat)
                 .item(&detach_canvas)
@@ -835,6 +841,7 @@ pub fn run() {
             let checkables: tauri::State<'_, CheckableMenuItems> = handle.state();
             match checkables.items.lock() {
                 Ok(mut map) => {
+                    map.insert("file:toggle-auto-save".to_string(), auto_save);
                     map.insert("view:show-chat".to_string(), show_chat);
                     map.insert("view:show-canvas".to_string(), show_canvas);
                     map.insert("view:show-sidebar".to_string(), show_sidebar);

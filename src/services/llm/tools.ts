@@ -17,8 +17,21 @@ import type { ID } from '../../types';
  * - `create_audio_artifact` is registered when an OpenAI key is configured.
  * - `create_video_artifact` is registered when an OpenAI key is configured
  *   AND `settings.artifacts.videoEnabled === true` (Sora 2 deprecates 2026).
+ *
+ * `opts.dropForGoogleSearch` skips registering function tools entirely.
+ * Google's `prepareTools` drops every function tool in the request when
+ * the provider-defined `googleSearch` tool is present, so building them
+ * here would only be wasted bytes — and confuse downstream code that
+ * expects "no function tools" when web search is the only thing
+ * Gemini will actually call.
  */
-export async function buildTools(conversationId: ID) {
+export async function buildTools(
+  conversationId: ID,
+  opts: { dropForGoogleSearch?: boolean } = {},
+) {
+  if (opts.dropForGoogleSearch) {
+    return {} as Record<string, unknown>;
+  }
   const settings = useStore.getState().settings;
   const [hasAnthropic, hasOpenAi] = await Promise.all([
     secrets.get(SECRET_KEY('anthropic')).then((k) => Boolean(k)),

@@ -15,16 +15,21 @@ type MenuTarget =
   | { node: MarkdownTreeNode; x: number; y: number }
   | { node: null; x: number; y: number };
 
-// Mirror confirmation cheat: only files matching this pattern under
-// `Chats/` or `Projects/` are *candidates* for the chat badge. We then
-// confirm by reading the file's frontmatter and checking
-// `source: internal-chat`. The pattern check keeps the frontmatter scan
-// bounded even on large vaults.
+// Mirror confirmation cheat: only files matching this pattern under the
+// current chat-history layout (or the legacy Chats/Projects layout) are
+// candidates for the chat badge. We then confirm by reading frontmatter and
+// checking `source: internal-chat`. The pattern check keeps the scan bounded.
 const MIRROR_FILENAME_PATTERN = /--[A-Za-z0-9_-]{6,}\.md$/i;
 function isMirrorCandidate(node: MarkdownTreeNode): boolean {
   if (node.kind !== 'file') return false;
   if (!MIRROR_FILENAME_PATTERN.test(node.name)) return false;
-  return node.path.startsWith('Chats/') || node.path.startsWith('Projects/');
+  return (
+    node.path.startsWith('default/chat-history/') ||
+    node.path.startsWith('chat-history/') ||
+    node.path.startsWith('projects/') ||
+    node.path.startsWith('Chats/') ||
+    node.path.startsWith('Projects/')
+  );
 }
 
 function obsidianLinkFor(node: MarkdownTreeNode): string {
@@ -121,14 +126,12 @@ export function MarkdownFileExplorer({
         showToast('error', `Knowledge Base sync failed: ${detail.error}`);
         return;
       }
-      const errs = detail.errors ?? [];
-      if (errs.length > 0) {
-        showToast(
-          'error',
-          `Sync had ${errs.length} issue${errs.length === 1 ? '' : 's'} — see console.`,
-        );
-        return;
-      }
+      // Per-item errors used to surface as a noisy red toast on every
+      // sync — typically caused by harmless leftovers (a stale file
+      // from an earlier mirror layout, or a user-edited file without
+      // `source: internal-chat` frontmatter that we refuse to touch).
+      // The full per-item details land in the devtools console via
+      // `console.error` from `persistence.ts`, so the toast is gone.
       if ((detail.written ?? 0) > 0) {
         showToast(
           'info',

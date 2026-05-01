@@ -1,5 +1,5 @@
 export type SlashCommand = {
-  id: 'summarize' | 'newchat' | 'clear';
+  id: 'summarize' | 'newchat' | 'clear' | 'import-graph';
   trigger: string;
   label: string;
   description: string;
@@ -23,6 +23,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/clear',
     label: 'Clear input',
     description: 'Clear the current message input',
+  },
+  {
+    id: 'import-graph',
+    trigger: '/import-graph',
+    label: 'Import to map',
+    description: 'Paste a chat or text blob; build a graph of nodes + edges',
   },
 ];
 

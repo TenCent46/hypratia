@@ -3,11 +3,10 @@ import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
 
 /**
- * Markdown highlight style that gives the live-preview surface a feel
- * closer to Obsidian's editor: large headings, distinct emphasis colours,
- * monospaced code, dimmed punctuation. The colours hook into the app's
- * CSS custom properties so light/dark themes are automatically picked
- * up — see `src/App.css` for the variables.
+ * Markdown highlight style. Live Preview is the only editor mode, so we
+ * keep one Obsidian-leaning palette: large headings, distinct emphasis
+ * colours, monospaced code, dimmed punctuation. Colours pull from the
+ * app's CSS custom properties (see `src/App.css`) so the themes track.
  */
 export const kbHighlightStyle = HighlightStyle.define([
   { tag: t.heading1, fontSize: '1.7em', fontWeight: '700', lineHeight: '1.2' },
@@ -21,7 +20,11 @@ export const kbHighlightStyle = HighlightStyle.define([
   { tag: t.strikethrough, textDecoration: 'line-through' },
   { tag: t.link, color: 'var(--accent)' },
   { tag: t.url, color: 'var(--accent)' },
-  { tag: t.monospace, fontFamily: 'var(--font-mono, ui-monospace, Menlo, monospace)', color: 'var(--text)' },
+  {
+    tag: t.monospace,
+    fontFamily: 'var(--font-mono, ui-monospace, Menlo, monospace)',
+    color: 'var(--text)',
+  },
   { tag: t.list, color: 'var(--text)' },
   { tag: t.quote, color: 'var(--text-mute)', fontStyle: 'italic' },
   { tag: t.processingInstruction, color: 'var(--text-mute)' },
@@ -70,6 +73,11 @@ export const kbLivePreviewTheme = EditorView.theme(
       color: 'var(--danger)',
       textDecorationStyle: 'wavy',
     },
+    '.cm-md-link': {
+      color: 'var(--accent)',
+      textDecoration: 'underline',
+      cursor: 'pointer',
+    },
     '.cm-panels': {
       backgroundColor: 'var(--bg)',
       color: 'var(--text)',
@@ -82,52 +90,6 @@ export const kbLivePreviewTheme = EditorView.theme(
   { dark: false },
 );
 
-export const kbSourceTheme = EditorView.theme(
-  {
-    '&': {
-      backgroundColor: 'transparent',
-      color: 'var(--text)',
-      height: '100%',
-    },
-    '.cm-scroller': {
-      fontFamily: 'var(--font-mono, ui-monospace, Menlo, monospace)',
-      fontSize: '13px',
-      lineHeight: '1.55',
-      padding: '8px 0 64px',
-    },
-    '.cm-content': {
-      maxWidth: '900px',
-      margin: '0 auto',
-      caretColor: 'var(--accent)',
-    },
-    '.cm-cursor': {
-      borderLeftColor: 'var(--accent)',
-    },
-    '&.cm-focused .cm-selectionBackground, ::selection': {
-      backgroundColor: 'var(--accent-soft)',
-    },
-    '.cm-kb-wikilink': {
-      color: 'var(--accent)',
-      textDecoration: 'underline',
-      textDecorationStyle: 'dotted',
-      cursor: 'pointer',
-    },
-    '.cm-kb-wikilink-broken': {
-      color: 'var(--danger)',
-      textDecorationStyle: 'wavy',
-    },
-    '.cm-panels': {
-      backgroundColor: 'var(--bg)',
-      color: 'var(--text)',
-      borderTop: '1px solid var(--border)',
-    },
-  },
-  { dark: false },
-);
-
-export function kbThemeExtension(mode: 'live-preview' | 'source') {
-  if (mode === 'source') {
-    return [kbSourceTheme, syntaxHighlighting(kbHighlightStyle)];
-  }
+export function kbThemeExtension() {
   return [kbLivePreviewTheme, syntaxHighlighting(kbHighlightStyle)];
 }

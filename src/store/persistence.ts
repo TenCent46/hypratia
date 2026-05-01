@@ -168,11 +168,37 @@ export async function hydrateAndWire(): Promise<void> {
       const result = await syncConversationMirror({
         conversations: s.conversations,
         messages: s.messages,
+        nodes: s.nodes,
+        edges: s.edges,
         projects: s.projects,
         markdownStorageDir: s.settings.markdownStorageDir,
+        incognitoUnprojectedChats: s.settings.incognitoUnprojectedChats,
       });
       if (result.errors.length > 0) {
-        console.warn('mirror sync had errors', result.errors);
+        // Log each error on its own line so they survive aggressive
+        // devtools log filters (a single `console.warn(arr)` call hides
+        // the contents behind a collapse, and `warn` is filtered out
+        // when users set the level to "Errors only").
+        console.error(
+          `[knowledge-mirror] sync had ${result.errors.length} issue(s):`,
+        );
+        for (const e of result.errors) {
+          console.error(
+            `[knowledge-mirror] · conversationId=${e.conversationId} reason=${e.reason}`,
+          );
+        }
+      }
+      for (const link of result.deletedLinks ?? []) {
+        const latest = useStore.getState();
+        for (const node of latest.nodes) {
+          if (
+            node.conversationId === link.conversationId &&
+            node.sourceMessageId &&
+            !node.mdPath
+          ) {
+            latest.updateNode(node.id, { mdPath: link.path });
+          }
+        }
       }
       window.dispatchEvent(
         new CustomEvent('mc:knowledge-sync', { detail: result }),
@@ -195,6 +221,12 @@ export async function hydrateAndWire(): Promise<void> {
   }
   useStore.subscribe((s) => s.conversations, () => scheduleMirror());
   useStore.subscribe((s) => s.messages, () => scheduleMirror());
+  useStore.subscribe((s) => s.nodes, () => scheduleMirror());
+  useStore.subscribe((s) => s.edges, () => scheduleMirror());
+  useStore.subscribe(
+    (s) => s.settings.incognitoUnprojectedChats,
+    () => scheduleMirror(),
+  );
   // Manual "Sync now" trigger from the Knowledge Base header. Bypasses the
   // debounce so the user gets immediate feedback.
   window.addEventListener('mc:knowledge-sync-request', () => {

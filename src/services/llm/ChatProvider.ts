@@ -38,6 +38,14 @@ export type ChatRequest = {
    * artifacts land in the right project folder.
    */
   conversationId?: string;
+  /**
+   * Attach the provider's native web-search tool when the model supports
+   * it. Mapped per provider:
+   *   - Anthropic → `web_search_20250305`
+   *   - OpenAI → Responses-API `web_search`
+   *   - Google  → `google_search` grounding (drops custom function tools)
+   */
+  webSearch?: boolean;
 };
 
 export type ChatChunk =

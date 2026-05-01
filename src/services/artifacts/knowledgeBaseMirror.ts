@@ -2,10 +2,15 @@ import {
   resolveMarkdownRoot,
   writeMarkdownFileEnsuringDirs,
 } from '../storage/MarkdownFileService';
+import {
+  PROJECT_RAW_DIR,
+  ROOT_RAW_DIR,
+  projectBasePath,
+} from '../knowledge/knowledgeBaseLayout';
 import { useStore } from '../../store';
-import type { ArtifactProviderId, ArtifactKind } from './types';
+import type { ArtifactProviderId } from './types';
 
-const ARTIFACT_ROOT = 'Artifacts';
+const LEGACY_ARTIFACT_ROOT = 'Artifacts';
 
 function monthBucket(d: Date = new Date()): string {
   const y = d.getFullYear();
@@ -17,7 +22,7 @@ function escapeYaml(value: string): string {
   return value.replace(/"/g, '\\"');
 }
 
-export type MirrorTextInput = {
+export type LegacyMirrorTextInput = {
   filename: string;
   content: string;
   artifactId: string;
@@ -28,32 +33,41 @@ export type MirrorTextInput = {
   createdAt: string;
 };
 
-export type MirrorSidecarInput = {
-  basename: string;
-  artifactId: string;
-  artifactKind: Exclude<ArtifactKind, 'text'>;
-  extension: string;
-  attachmentRelPath: string;
-  provider: ArtifactProviderId;
+/**
+ * Project-aware lookup: returns the relative path inside the user's
+ * Knowledge Base where the raw artifact bytes were just placed by the
+ * attachment ingest mirror. Returns `undefined` when the conversation is
+ * not mirrorable (incognito unprojected chats), so the caller can decide
+ * whether to fall back to the legacy `Artifacts/` sidecar.
+ */
+export async function resolveProjectRawPath(args: {
   conversationId: string;
-  sourceMessageId?: string;
-  title?: string;
-  sizeBytes: number;
-  createdAt: string;
-};
-
-async function rootPath(): Promise<string | null> {
-  const settings = useStore.getState().settings;
-  if (settings.artifacts?.mirrorTextToKnowledgeBase === false) return null;
-  return resolveMarkdownRoot(settings.markdownStorageDir);
+  filename: string;
+}): Promise<string | undefined> {
+  const state = useStore.getState();
+  const conv = state.conversations.find((c) => c.id === args.conversationId);
+  const project = conv?.projectId
+    ? state.projects.find((p) => p.id === conv.projectId)
+    : undefined;
+  if (!project && state.settings.incognitoUnprojectedChats) return undefined;
+  const rawDir = project
+    ? `${projectBasePath(project)}/${PROJECT_RAW_DIR}`
+    : ROOT_RAW_DIR;
+  return `${rawDir}/${args.filename}`;
 }
 
-export async function mirrorTextArtifact(
-  input: MirrorTextInput,
+/**
+ * Legacy fallback: write a frontmatter-wrapped markdown sidecar into
+ * `Artifacts/YYYY-MM/...`. Used only when the project-raw mirror is
+ * unavailable (incognito) so the user still has something to open.
+ */
+export async function mirrorTextArtifactLegacy(
+  input: LegacyMirrorTextInput,
 ): Promise<string | undefined> {
-  const root = await rootPath();
-  if (!root) return undefined;
-  const folder = `${ARTIFACT_ROOT}/${monthBucket(new Date(input.createdAt))}`;
+  const settings = useStore.getState().settings;
+  if (settings.artifacts?.mirrorTextToKnowledgeBase === false) return undefined;
+  const root = await resolveMarkdownRoot(settings.markdownStorageDir);
+  const folder = `${LEGACY_ARTIFACT_ROOT}/${monthBucket(new Date(input.createdAt))}`;
   const relPath = `${folder}/${input.filename}`;
 
   const fm = [
@@ -75,41 +89,5 @@ export async function mirrorTextArtifact(
     ? input.content
     : `${fm}${input.content}`;
   await writeMarkdownFileEnsuringDirs(root, relPath, body);
-  return relPath;
-}
-
-export async function mirrorSidecar(
-  input: MirrorSidecarInput,
-): Promise<string | undefined> {
-  const root = await rootPath();
-  if (!root) return undefined;
-  const folder = `${ARTIFACT_ROOT}/${monthBucket(new Date(input.createdAt))}`;
-  const relPath = `${folder}/${input.basename}.md`;
-
-  const lines = [
-    '---',
-    'type: artifact',
-    `artifactType: ${input.extension}`,
-    `artifactKind: ${input.artifactKind}`,
-    `artifactId: ${input.artifactId}`,
-    `localPath: ${input.attachmentRelPath}`,
-    `provider: ${input.provider}`,
-    `sourceConversationId: ${input.conversationId}`,
-    input.sourceMessageId ? `sourceMessageId: ${input.sourceMessageId}` : null,
-    `createdAt: ${input.createdAt}`,
-    `sizeBytes: ${input.sizeBytes}`,
-    input.title ? `title: "${escapeYaml(input.title)}"` : null,
-    '---',
-    '',
-    `# ${input.title ?? input.basename}`,
-    '',
-    `Generated \`${input.extension}\` lives at \`${input.attachmentRelPath}\`. Open via the chat artifact card or use Reveal in Finder.`,
-    '',
-  ];
-  await writeMarkdownFileEnsuringDirs(
-    root,
-    relPath,
-    lines.filter((l): l is string => l !== null).join('\n'),
-  );
   return relPath;
 }

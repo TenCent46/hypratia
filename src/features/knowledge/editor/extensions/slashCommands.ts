@@ -54,14 +54,6 @@ const COMMANDS: SlashCommand[] = [
     },
   },
   {
-    label: 'Toggle Reading view',
-    action: { kind: 'event', event: 'mc:editor-toggle-mode', detail: { mode: 'reading' } },
-  },
-  {
-    label: 'Toggle Source mode',
-    action: { kind: 'event', event: 'mc:editor-toggle-mode', detail: { mode: 'source' } },
-  },
-  {
     label: 'Save',
     action: { kind: 'event', event: 'mc:editor-save' },
   },

@@ -49,6 +49,7 @@ function ArtifactNodeImpl({ data, selected, id }: NodeProps<ArtifactNodeType>) {
     const tags = node?.tags ?? [];
     for (const t of tags) {
       if (PROVIDER_LABELS[t]) return PROVIDER_LABELS[t];
+      if (t.startsWith('file:')) return 'Local file';
     }
     return 'Generated';
   })();
@@ -71,6 +72,15 @@ function ArtifactNodeImpl({ data, selected, id }: NodeProps<ArtifactNodeType>) {
     } catch {
       /* ignore */
     }
+  }
+
+  function preview() {
+    if (!att) return;
+    window.dispatchEvent(
+      new CustomEvent('mc:open-attachment-preview', {
+        detail: { attachmentId: att.id, title: data.title || att.filename },
+      }),
+    );
   }
 
   const filename = att?.filename ?? data.title ?? 'artifact';
@@ -114,6 +124,16 @@ function ArtifactNodeImpl({ data, selected, id }: NodeProps<ArtifactNodeType>) {
             </div>
           </div>
           <div className="artifact-node-actions">
+            <button
+              type="button"
+              className="link"
+              onClick={(e) => {
+                e.stopPropagation();
+                preview();
+              }}
+            >
+              Preview
+            </button>
             <button
               type="button"
               className="link"

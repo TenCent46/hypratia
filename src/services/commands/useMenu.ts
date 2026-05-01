@@ -31,6 +31,7 @@ export function useMenu(controls: LayoutControls): void {
     let cancelled = false;
     let unlistenFn: (() => void) | null = null;
     onMenuEvent((id: MenuId) => {
+      if (!document.hasFocus()) return;
       const s = useStore.getState();
       switch (id) {
         case 'app:preferences':
@@ -47,6 +48,11 @@ export function useMenu(controls: LayoutControls): void {
         }
         case 'file:open-folder': {
           window.dispatchEvent(new CustomEvent('mc:knowledge-choose-folder'));
+          break;
+        }
+        case 'file:toggle-auto-save': {
+          const cur = s.settings.markdownAutoSave ?? true;
+          s.setMarkdownAutoSave(!cur);
           break;
         }
         case 'file:detach-chat':

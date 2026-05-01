@@ -6,6 +6,7 @@ export type MenuId =
   | 'file:new-chat'
   | 'file:new-project'
   | 'file:open-folder'
+  | 'file:toggle-auto-save'
   | 'file:detach-chat'
   | 'file:detach-canvas'
   | 'chat:new-window'

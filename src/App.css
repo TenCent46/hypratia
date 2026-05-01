@@ -198,17 +198,64 @@ input::placeholder {
 .sidebar.collapsed .sidebar-spacer {
   flex: 1;
 }
+/* Icon-button base. Single-glyph buttons (×, +, ↻, ⤓ …) centered with
+   `place-items: center` would otherwise sit a pixel or two below/right
+   of the geometric center because the rendered text box includes the
+   font's full ascender/descender height — the *ink* of the glyph sits
+   above the baseline, not the box center. Forcing `line-height: 1` and
+   stripping the browser's default button padding makes the text box
+   the same size as the font box, so geometric center === visible
+   center. SVG children also get `display: block` to drop their inline
+   baseline shim. Keep this rule in sync with new icon button classes
+   below. */
+.sidebar-icon-btn,
+.sidebar-section-add,
+.sidebar-collapse,
+.canvas-modal-close,
+.canvas-tool-switcher button,
+.chat-tab-close,
+.chat-tab-new,
+.message-input-icon,
+.message-input-send-circle,
+.composer-menu-item-icon,
+.composer-menu-item-trailing,
+.editor-side-rail button,
+.editor-side-tabs button,
+.editor-side-collapse,
+.pane-close,
+.markdown-document-actions button {
+  padding: 0;
+  line-height: 1;
+}
+.sidebar-icon-btn > svg,
+.sidebar-section-add > svg,
+.canvas-modal-close > svg,
+.canvas-tool-switcher button > svg,
+.chat-tab-close > svg,
+.chat-tab-new > svg,
+.message-input-icon > svg,
+.message-input-send-circle > svg,
+.editor-side-collapse > svg,
+.pane-close > svg {
+  display: block;
+}
+
 .sidebar-icon-btn {
   width: 36px;
   height: 36px;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text);
   font-size: 18px;
+  line-height: 1;
   cursor: pointer;
   border-radius: 6px;
   display: grid;
   place-items: center;
+}
+.sidebar-icon-btn > svg {
+  display: block;
 }
 .sidebar-icon-btn:hover {
   background: var(--bg-soft);
@@ -216,7 +263,7 @@ input::placeholder {
 .sidebar-icon-btn.small {
   width: 22px;
   height: 22px;
-  font-size: 13px;
+  font-size: 16px;
 }
 
 .sidebar-top {
@@ -279,6 +326,44 @@ input::placeholder {
   flex-direction: column;
   gap: 2px;
 }
+/* The sidebar's body has two tabs (Projects / Files); the active section
+   takes whatever vertical space is left below the tab strip and scrolls
+   internally. Used in addition to `.sidebar-section`. */
+.sidebar-section-fill {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.sidebar-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-tab {
+  flex: 1;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-mute);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  line-height: 1;
+}
+.sidebar-tab:hover {
+  color: var(--text);
+}
+.sidebar-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
 .sidebar-section-recents {
   flex: 1;
   min-height: 0;
@@ -291,23 +376,32 @@ input::placeholder {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px 4px;
+  /* Balanced vertical padding so the inline + button doesn't drift
+     below the row's geometric center (`align-items: center` aligns to
+     the content-box, which is offset when top != bottom padding). */
+  padding: 6px 10px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--text-mute);
 }
 .sidebar-section-add {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text-mute);
   cursor: pointer;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1;
   display: grid;
   place-items: center;
+}
+.sidebar-section-add > svg {
+  display: block;
 }
 .sidebar-section-add:hover {
   background: var(--bg-soft);
@@ -315,9 +409,18 @@ input::placeholder {
 }
 
 .sidebar-projects {
+  /* Scrollable tree body inside `.sidebar-section-fill`. Without
+     `flex: 1; min-height: 0; overflow-y: auto` the list gets clipped
+     by the section's `overflow: hidden` once it exceeds the visible
+     height. */
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 1px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 8px;
 }
 .sidebar-project {
   display: flex;
@@ -353,7 +456,13 @@ input::placeholder {
 }
 .sidebar-project-icon {
   width: 18px;
-  text-align: center;
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-mute);
+  flex-shrink: 0;
+}
+.sidebar-project-icon > svg {
+  display: block;
 }
 .sidebar-project-name {
   flex: 1;
@@ -520,10 +629,17 @@ input::placeholder {
 }
 
 .knowledge-section {
+  /* Grow to fill the sidebar tab body. The historical `max-height: 38vh`
+     made sense when the explorer shared the sidebar with stacked
+     sections, but now the explorer is its own tab inside
+     `.sidebar-section-fill` and should claim the full vertical space.
+     Internal scrolling is owned by `.knowledge-tree` and
+     `.knowledge-search-results`. */
   display: flex;
   flex-direction: column;
-  min-height: 148px;
-  max-height: 38vh;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -566,22 +682,15 @@ input::placeholder {
   color: var(--text);
 }
 /* Action buttons overlay the title on hover so they never push the
-   folder name into ellipsis early. The bar gets a soft fade behind the
-   buttons so the title text stays readable underneath. */
+   folder name into ellipsis early. No backdrop — the buttons float
+   directly over the title text. */
 .knowledge-actions {
   position: absolute;
   top: 4px;
   right: 4px;
   display: flex;
   gap: 2px;
-  padding: 2px 4px;
-  border-radius: 6px;
-  background: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--bg) 0%, transparent) 0%,
-    color-mix(in srgb, var(--bg) 85%, transparent) 18%,
-    color-mix(in srgb, var(--bg) 96%, transparent) 100%
-  );
+  background: transparent;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease-in-out;
@@ -883,59 +992,6 @@ input::placeholder {
 .right-tabs .pane-close {
   margin-left: auto;
 }
-.workspace-layout-menu {
-  position: fixed;
-  z-index: 220;
-  min-width: 260px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  box-shadow: var(--shadow-modal);
-}
-.workspace-layout-menu-title {
-  padding: 4px 8px 6px;
-  color: var(--text-mute);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-.workspace-layout-menu button {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 42px 1fr;
-  align-items: center;
-  gap: 10px;
-  border: 0;
-  border-radius: 6px;
-  padding: 7px 8px;
-  text-align: left;
-  background: transparent;
-}
-.workspace-layout-menu button:hover:not(:disabled) {
-  background: var(--bg-soft);
-}
-.workspace-layout-menu button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.workspace-layout-menu span {
-  color: var(--text-mute);
-  font-size: 12px;
-}
-.workspace-layout-menu strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.workspace-layout-menu hr {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: 4px 0;
-}
 /* Edge hot-zones: invisible strips that reveal a hidden panel on hover. */
 .edge-hot-zone {
   position: absolute;
@@ -995,6 +1051,244 @@ input::placeholder {
   background: var(--bg);
 }
 
+.document-workspace {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 34px minmax(0, 1fr);
+  background: var(--bg);
+  color: var(--text);
+}
+.document-tab-strip {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 92%, var(--bg-soft));
+  scrollbar-width: thin;
+}
+.document-tab {
+  flex: 0 1 220px;
+  min-width: 128px;
+  max-width: 260px;
+  display: flex;
+  align-items: stretch;
+  border-right: 1px solid var(--border);
+  color: var(--text-mute);
+  background: transparent;
+}
+.document-tab.active {
+  color: var(--text);
+  background: var(--bg);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+/* Preview tab (VSCode-style): single-click opened, italic title, gets
+   replaced by the next preview open. Double-clicking the title
+   promotes the tab to permanent and clears the italic. */
+.document-tab.preview .document-tab-title {
+  font-style: italic;
+}
+.document-tab-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.document-tab-kind {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-mute);
+}
+.document-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-tab-close {
+  flex: 0 0 24px;
+  width: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-mute);
+  font-size: 13px;
+}
+.document-tab-pick:hover,
+.document-tab-close:hover {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+.document-tab-content {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.attachment-preview {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  container-type: inline-size;
+  background: var(--bg);
+  color: var(--text);
+}
+.attachment-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 94%, var(--bg-soft));
+}
+.attachment-preview-header > div:first-child {
+  min-width: 0;
+}
+.attachment-preview-header h2 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 1.25;
+}
+.attachment-preview-header p {
+  margin: 3px 0 0;
+  color: var(--text-mute);
+  font-size: 12px;
+}
+.attachment-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.attachment-preview-actions button {
+  height: 26px;
+  padding: 0 9px;
+  border-color: var(--border);
+  background: var(--bg);
+  color: var(--text-mute);
+  font-size: 12px;
+}
+.attachment-preview-actions button:hover {
+  color: var(--text);
+  background: var(--bg-soft);
+}
+.attachment-preview-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+.attachment-preview-empty {
+  margin: 28px auto;
+  width: min(560px, 100%);
+  color: var(--text-mute);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+.attachment-preview-image {
+  display: grid;
+  place-items: start center;
+  min-height: 100%;
+}
+.attachment-preview-image img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+.attachment-preview-text {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.attachment-pdf-page {
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto 18px;
+}
+.attachment-pdf-page canvas {
+  max-width: none;
+  background: white;
+  box-shadow: 0 1px 5px rgba(15, 23, 42, 0.16);
+}
+.pdf-page-label {
+  margin-top: 6px;
+  font-size: 11px;
+  text-align: center;
+}
+.attachment-csv-wrap {
+  overflow: auto;
+}
+.attachment-csv-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.attachment-csv-table th,
+.attachment-csv-table td {
+  max-width: 340px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.attachment-csv-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+.attachment-office-text {
+  width: min(820px, 100%);
+  margin: 0 auto;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.attachment-office-text p {
+  margin: 0 0 0.75em;
+}
+.attachment-slide-preview {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.attachment-slide-preview h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-mute);
+}
+@container (max-width: 430px) {
+  .attachment-preview-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .attachment-preview-actions {
+    width: 100%;
+  }
+}
+
 .markdown-document {
   height: 100%;
   min-height: 0;
@@ -1009,7 +1303,7 @@ input::placeholder {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 10px 14px 8px;
+  padding: 7px 12px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 94%, var(--bg-soft));
 }
@@ -1023,15 +1317,6 @@ input::placeholder {
   white-space: nowrap;
   color: var(--text-mute);
   font-size: 12px;
-}
-.markdown-document h1 {
-  margin: 2px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: 0;
 }
 .markdown-document-actions {
   display: flex;
@@ -1149,6 +1434,68 @@ input::placeholder {
   flex: 1;
   min-height: 0;
   outline: none;
+}
+.markdown-cm-host .cm-editor,
+.markdown-cm-host .cm-scroller {
+  background: var(--bg);
+  color: var(--text);
+}
+.markdown-cm-host .cm-gutters {
+  background: var(--bg);
+  color: var(--text-mute);
+  border-right: 1px solid var(--border);
+}
+.markdown-cm-host .cm-gutterElement {
+  color: var(--text-mute);
+}
+.markdown-cm-host .cm-foldGutter .cm-gutterElement {
+  color: var(--text-mute);
+  cursor: pointer;
+}
+.markdown-cm-host .cm-foldGutter .cm-gutterElement:hover {
+  color: var(--text);
+}
+.markdown-cm-host .cm-activeLineGutter {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+.markdown-cm-host .cm-activeLine {
+  background: color-mix(in srgb, var(--bg-soft) 60%, transparent);
+}
+.markdown-cm-host .cm-cursor,
+.markdown-cm-host .cm-dropCursor {
+  border-left-color: var(--text);
+}
+.markdown-cm-host .cm-selectionBackground,
+.markdown-cm-host .cm-content ::selection {
+  background: var(--accent-soft) !important;
+}
+.markdown-cm-host .cm-focused .cm-selectionBackground {
+  background: var(--accent-soft) !important;
+}
+.markdown-cm-host .cm-md-image {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: 6px;
+  margin: 4px 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.markdown-cm-host .cm-md-task-checkbox {
+  margin: 0 4px 0 0;
+  vertical-align: middle;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.markdown-cm-host .cm-md-hr {
+  display: inline-block;
+  width: 100%;
+  height: 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.markdown-cm-host .cm-md-link:hover {
+  text-decoration-thickness: 2px;
 }
 .markdown-document-reader-host {
   flex: 1;
@@ -1272,14 +1619,35 @@ input::placeholder {
   display: flex;
   flex-direction: column;
 }
+.markdown-document-title-input {
+  flex: 0 0 auto;
+  width: min(860px, calc(100% - 44px));
+  margin: 20px auto 8px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+.markdown-document-title-input::placeholder {
+  color: var(--text-mute);
+}
+.markdown-document-title-input:focus {
+  color: var(--text);
+}
 .editor-side-panel {
-  /* Pinned to the right boundary of the markdown pane. The width clamps
+  /* Pinned to the LEFT boundary of the markdown pane. The width clamps
      so the panel never collapses to 0 even when the parent pane is
      dragged very narrow — the user can still reach Outline / Backlinks /
      Tags / Suggested at any pane width. */
   width: clamp(180px, 30%, 240px);
   flex-shrink: 0;
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 92%, var(--bg-soft));
   display: flex;
   flex-direction: column;
@@ -1488,6 +1856,11 @@ input::placeholder {
    so Outline / Backlinks / Tags / Suggested remain reachable. The panel
    stays expanded; only its chrome compacts. */
 @container (max-width: 520px) {
+  .markdown-document-title-input {
+    width: calc(100% - 28px);
+    margin-top: 16px;
+    font-size: 24px;
+  }
   .editor-side-panel:not(.is-collapsed) .editor-side-label {
     display: none;
   }
@@ -1881,6 +2254,108 @@ input::placeholder {
   color: var(--accent);
   border-color: var(--accent-soft);
   background: var(--accent-soft);
+}
+
+.canvas-tool-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 2px 2px;
+}
+
+/* Theme node — compact conversation-map card. See spec 32. */
+.theme-node {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: border-color 0.1s ease, box-shadow 0.15s ease;
+}
+.theme-node:hover {
+  border-color: var(--accent-soft);
+}
+.theme-node.selected {
+  border-color: var(--accent);
+  border-width: 2px;
+  padding: 7px 9px;
+}
+.theme-node--theme {
+  background: var(--bg-soft);
+}
+.theme-node--insight {
+  border-left: 3px solid #d4a017;
+}
+.theme-node--decision {
+  border-left: 3px solid #2e8b57;
+}
+.theme-node-title {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.theme-node-summary {
+  font-size: 12px;
+  color: var(--text-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.theme-node-glyph {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  font-size: 11px;
+  color: var(--text-mute);
+  font-weight: 600;
+  pointer-events: none;
+}
+.theme-node-importance {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-mute);
+  pointer-events: none;
+}
+.theme-node-importance.imp-1 { opacity: 0.25; }
+.theme-node-importance.imp-2 { opacity: 0.45; }
+.theme-node-importance.imp-3 { opacity: 0.65; }
+.theme-node-importance.imp-4 { opacity: 0.85; }
+.theme-node-importance.imp-5 { opacity: 1; }
+
+/* Related-topic edges render dashed; parent edges keep the default. */
+.react-flow__edge.edge-kind-related path {
+  stroke-dasharray: 6 4;
+}
+
+/* Brief flash when a chat message is jumped to from the canvas. */
+.message--flash {
+  animation: mc-message-flash 1.2s ease-out;
+}
+@keyframes mc-message-flash {
+  0% {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
 }
 
 .selection-menu-title {
@@ -2318,19 +2793,96 @@ input::placeholder {
   align-items: center;
   gap: 6px;
 }
+/* Drag handle (the small grip in each message header). This is the
+   ONLY draggable surface — the rest of the message stays a normal
+   selectable region so users can highlight + copy text. Native HTML
+   draggable=true on the whole row would suppress text selection
+   inside it (Chrome/WebKit prefer drag over selection on selectable
+   text inside a draggable element). */
 .message .drag-hint {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  border-radius: 4px;
   font-size: 13px;
   letter-spacing: -2px;
   color: var(--text-mute);
-  opacity: 0.7;
-}
-.message[draggable='true'] {
+  opacity: 0.45;
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: element;
+  transition: opacity 100ms ease, color 100ms ease, background 100ms ease;
 }
-.message[draggable='true']:active {
+.message:hover .drag-hint,
+.message:focus-within .drag-hint {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.message .drag-hint:active {
   cursor: grabbing;
 }
+.message.dragging {
+  opacity: 0.55;
+}
+
+.canvas-duplicate-toast {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: var(--shadow-modal);
+  font-size: 13px;
+  z-index: 30;
+  animation: canvas-duplicate-toast-in 120ms ease-out;
+}
+@keyframes canvas-duplicate-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.canvas-duplicate-toast-text {
+  color: var(--text);
+}
+.canvas-duplicate-toast-suppress {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  text-decoration: underline;
+}
+.canvas-duplicate-toast-close {
+  border: none;
+  background: transparent;
+  color: var(--text-mute);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.canvas-duplicate-toast-close:hover {
+  color: var(--text);
+}
+
 .message-drag-ghost {
   position: fixed;
   top: -1000px;
@@ -2364,9 +2916,129 @@ input::placeholder {
   font-size: 12px;
   line-height: 1.45;
 }
+
 .message .content {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Collapsed long user prompt. Click the bubble to expand. The button
+   element is reused as the bubble so the entire surface is the click
+   target — kept invisible (no border, no background) so it reads as
+   ordinary message text plus a fade-out + hint. */
+.message .content.user-collapsible {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.message .content.user-collapsible.collapsed {
+  position: relative;
+  /* ~5 lines at 1.5 line-height (uses --font-size from .message-input) */
+  max-height: calc(1.5em * 5);
+  overflow: hidden;
+  padding-bottom: 18px;
+}
+.user-collapsible-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 36px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in srgb, var(--bg) 92%, var(--bg-soft)) 100%
+  );
+}
+.user-collapsible-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 2px;
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+  pointer-events: none;
+}
+.message .content.user-collapsible.expanded {
+  cursor: default;
+  display: block;
+  position: relative;
+}
+.user-collapsible-toggle {
+  display: inline-block;
+  margin-top: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 0;
+  letter-spacing: 0.3px;
+}
+.user-collapsible-toggle:hover {
+  text-decoration: underline;
+}
+.message .content > :first-child {
+  margin-top: 0;
+}
+.message .content > :last-child {
+  margin-bottom: 0;
+}
+.message .content p,
+.message .content ul,
+.message .content ol,
+.message .content blockquote,
+.message .content pre,
+.message .content hr,
+.message .content table {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+/* GFM tables emitted by the assistant. `--border-strong` already
+   adapts per theme — warm dark on beige/sepia, light grey on dark,
+   #888 on high-contrast — so the table grid is always visible against
+   the chat surface. */
+.message .content table {
+  border-collapse: collapse;
+  border: 1px solid var(--border-strong);
+  font-size: 0.95em;
+  max-width: 100%;
+}
+.message .content th,
+.message .content td {
+  border: 1px solid var(--border-strong);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.message .content thead th,
+.message .content th {
+  background: var(--bg-soft);
+  font-weight: 600;
+}
+.message .content h1,
+.message .content h2,
+.message .content h3,
+.message .content h4,
+.message .content h5,
+.message .content h6 {
+  margin-top: 0.6em;
+  margin-bottom: 0.3em;
+}
+.message .content li {
+  margin-top: 0.15em;
+  margin-bottom: 0.15em;
+}
+.message .content li > p {
+  margin-top: 0.15em;
+  margin-bottom: 0.15em;
 }
 .message .actions {
   margin-top: 6px;
@@ -2450,6 +3122,7 @@ input::placeholder {
 .message-input-icon {
   width: 32px;
   height: 32px;
+  padding: 0;
   border: 0;
   border-radius: 50%;
   background: transparent;
@@ -2458,6 +3131,12 @@ input::placeholder {
   display: grid;
   place-items: center;
   flex-shrink: 0;
+}
+.message-input-icon > svg {
+  display: block;
+  /* Optical centering: stroked plus glyphs read 1px right of geometric
+     center to most eyes; nudge left so the plus sits visually middle. */
+  transform: translateX(-1px);
 }
 .message-input-icon:hover:not(:disabled) {
   background: var(--bg-soft);
@@ -3384,6 +4063,13 @@ input::placeholder {
   font-size: 13px;
   color: var(--text);
 }
+.app-context-menu-title {
+  padding: 5px 10px 6px;
+  color: var(--text-mute);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 [data-theme='dark'] .app-context-menu,
 [data-theme='high-contrast'] .app-context-menu {
   box-shadow:
@@ -3441,6 +4127,38 @@ input::placeholder {
   background: var(--border);
   margin: 4px 6px;
 }
+.app-context-submenu {
+  position: relative;
+}
+.app-context-submenu-body {
+  display: none;
+  position: absolute;
+  top: -4px;
+  left: calc(100% - 4px);
+  min-width: 240px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 12px 32px rgba(15, 23, 42, 0.18);
+  color: var(--text);
+}
+.app-context-submenu:hover > .app-context-submenu-body,
+.app-context-submenu:focus-within > .app-context-submenu-body {
+  display: block;
+}
+.app-context-submenu:hover > .app-context-menu-item {
+  background: var(--accent);
+  color: #fff;
+}
+[data-theme='dark'] .app-context-submenu-body,
+[data-theme='high-contrast'] .app-context-submenu-body {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 12px 32px rgba(0, 0, 0, 0.55);
+}
 
 /* Horizontal chat tab strip — shown when "Show Tabs in Sidebar" is off. */
 .chat-tab-bar {
@@ -3457,13 +4175,22 @@ input::placeholder {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-mute);
-  padding: 0 6px 0 2px;
+  padding: 4px 8px 4px 4px;
+  border: 0;
   border-right: 1px solid var(--border);
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
   flex-shrink: 0;
   max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border-radius: 4px;
+}
+.chat-tab-bar-scope:hover {
+  background: var(--bg-soft);
+  color: var(--text);
 }
 .chat-tab-bar-tabs {
   display: flex;
@@ -3503,11 +4230,26 @@ input::placeholder {
   border-color: var(--border-strong);
   color: var(--text);
 }
+.chat-tab.renaming {
+  cursor: text;
+  border-color: var(--accent);
+  background: var(--bg);
+}
 .chat-tab-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 140px;
+}
+.chat-tab-rename-input {
+  width: 140px;
+  padding: 0 2px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }
 .chat-tab-close {
   display: inline-grid;
@@ -3542,11 +4284,10 @@ input::placeholder {
   color: var(--text);
 }
 
-/* "Show Tabs in Sidebar" off: hide chat-row lists from the sidebar so the
-   chat tabs live in the top tab strip instead. The sidebar still shows the
-   project tree headers and primary actions. */
-.sidebar.chats-out .sidebar-section-recents,
-.sidebar.chats-out .sidebar-project-children {
+/* "Show Tabs in Sidebar" off: hide the orphan-chats list (it's redundant
+   with the top tab strip). Project children stay visible so the user can
+   still drill into a project from the sidebar. */
+.sidebar.chats-out .sidebar-section-recents {
   display: none;
 }
 
@@ -3966,6 +4707,53 @@ input::placeholder {
   place-items: center;
   z-index: 100;
   padding: 40px;
+}
+.markdown-insert-prompt {
+  width: min(420px, 100%);
+  gap: 14px;
+}
+.markdown-insert-prompt label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-mute);
+}
+.markdown-insert-prompt label input {
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.markdown-insert-prompt label input:focus {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+.markdown-insert-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.markdown-insert-prompt-actions button {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+.markdown-insert-prompt-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+.markdown-insert-prompt-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .modal {
   background: var(--bg);
@@ -4778,6 +5566,199 @@ input::placeholder {
   gap: 8px;
 }
 
+/* Graph import modal — paste-to-graph batch importer. See spec 33. */
+.graph-import-modal {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.graph-import-modal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.graph-import-modal h2 {
+  margin: 0 0 2px;
+  font-size: 18px;
+}
+.graph-import-modal p.muted {
+  margin: 0;
+  font-size: 13px;
+}
+.graph-import-modal footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.graph-import-textarea {
+  flex: 1;
+  min-height: 240px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font: 13px/1.5 var(--font-mono, ui-monospace, Menlo, monospace);
+  resize: vertical;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+}
+.graph-import-textarea:focus {
+  border-color: var(--accent);
+}
+.graph-import-summary {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+}
+
+/* Workspace configuration modal — instructions / memory / files for the
+   active conversation's project (or the default workspace). See spec
+   notes alongside services/knowledge/projectKnowledge.ts. */
+.workspace-config-modal {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.workspace-config-modal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.workspace-config-modal h2 {
+  margin: 0 0 2px;
+  font-size: 18px;
+}
+.workspace-config-modal p.muted {
+  margin: 0;
+  font-size: 13px;
+}
+.workspace-config-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.workspace-config-tab {
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-mute);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  line-height: 1;
+}
+.workspace-config-tab:hover {
+  color: var(--text);
+}
+.workspace-config-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.workspace-config-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+.workspace-config-meta {
+  font-size: 12px;
+  color: var(--text);
+}
+.workspace-config-meta code {
+  font-size: 11px;
+}
+.workspace-config-textarea {
+  flex: 1;
+  min-height: 320px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font: 13px/1.6 var(--font-mono, ui-monospace, Menlo, monospace);
+  resize: vertical;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+}
+.workspace-config-textarea:focus {
+  border-color: var(--accent);
+}
+.workspace-config-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.workspace-config-dropzone {
+  padding: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  text-align: center;
+  color: var(--text-mute);
+  font-size: 13px;
+  background: var(--bg-soft);
+}
+.workspace-config-dropzone .link {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.workspace-config-dropzone .link:hover {
+  text-decoration: underline;
+}
+.workspace-config-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.workspace-config-files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.workspace-config-files li:hover {
+  background: var(--bg-soft);
+}
+.workspace-config-files .link {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.workspace-config-files .link:hover {
+  text-decoration: underline;
+}
+
 /* AI palette */
 .ai-palette {
   background: var(--bg);
@@ -5026,7 +6007,8 @@ input::placeholder {
 .artifact-card {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface, #fff);
+  background: var(--bg-soft);
+  color: var(--text);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -5061,7 +6043,7 @@ input::placeholder {
 }
 .artifact-card-sub {
   font-size: 11px;
-  color: var(--muted, #777);
+  color: var(--text-mute);
   display: flex;
   gap: 6px;
   margin-top: 2px;
@@ -5084,7 +6066,7 @@ input::placeholder {
 .artifact-card-audio small {
   display: block;
   font-size: 10px;
-  color: var(--muted, #777);
+  color: var(--text-mute);
   margin-top: 4px;
 }
 

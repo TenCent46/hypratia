@@ -874,10 +874,104 @@ function AppearanceTab() {
 function VaultTab() {
   return (
     <>
+      <MarkdownEditorSettingsSection />
       <ChatHistoryStorageSection />
       <ObsidianVaultSection />
       <ArtifactSettingsSection />
+      <ConversationMapSection />
     </>
+  );
+}
+
+function MarkdownEditorSettingsSection() {
+  const autoSave = useStore((s) => s.settings.markdownAutoSave ?? true);
+  const setMarkdownAutoSave = useStore((s) => s.setMarkdownAutoSave);
+  const incognito = useStore(
+    (s) => s.settings.incognitoUnprojectedChats ?? false,
+  );
+  const setIncognito = useStore((s) => s.setIncognitoUnprojectedChats);
+  return (
+    <section className="settings-section">
+      <h3>Markdown editor</h3>
+      <label>
+        <input
+          type="checkbox"
+          checked={autoSave}
+          onChange={(e) => setMarkdownAutoSave(e.target.checked)}
+        />{' '}
+        Auto Save
+      </label>
+      <p className="muted small">
+        Saves Markdown changes automatically by default. Turn this off to use
+        manual save commands instead.
+      </p>
+      <label>
+        <input
+          type="checkbox"
+          checked={incognito}
+          onChange={(e) => setIncognito(e.target.checked)}
+        />{' '}
+        Incognito for chats without a project
+      </label>
+      <p className="muted small">
+        Unprojected chats stay in the running app state but are not mirrored
+        into the Knowledge Base. Project chats still save to their project
+        folder.
+      </p>
+    </section>
+  );
+}
+
+function ConversationMapSection() {
+  const wheelMode = useStore((s) => s.settings.canvasWheelMode ?? 'pan');
+  const setCanvasWheelMode = useStore((s) => s.setCanvasWheelMode);
+  const classifier = useStore(
+    (s) => s.settings.themesClassifier ?? 'auto',
+  );
+  const setThemesClassifier = useStore((s) => s.setThemesClassifier);
+  return (
+    <section>
+      <h3>Conversation map</h3>
+      <p className="muted">
+        The canvas is a compact map of your chat history. Each ask becomes a
+        node; clicking a node jumps the chat to the source message. See spec
+        32.
+      </p>
+      <div className="settings-row">
+        <label htmlFor="canvas-wheel-mode">Wheel behavior</label>
+        <select
+          id="canvas-wheel-mode"
+          value={wheelMode}
+          onChange={(e) =>
+            setCanvasWheelMode(e.target.value as 'pan' | 'zoom')
+          }
+        >
+          <option value="pan">Scroll / pan (Cmd-wheel zooms)</option>
+          <option value="zoom">Zoom (wheel zooms)</option>
+        </select>
+      </div>
+      <p className="muted small">
+        Toggle live with the <kbd>S</kbd> key. Pinch always zooms.
+      </p>
+      <div className="settings-row">
+        <label htmlFor="themes-classifier">Theme classifier</label>
+        <select
+          id="themes-classifier"
+          value={classifier}
+          onChange={(e) =>
+            setThemesClassifier(
+              e.target.value as 'auto' | 'heuristic' | 'llm',
+            )
+          }
+        >
+          <option value="auto">
+            Auto (LLM when a key is set, heuristic otherwise)
+          </option>
+          <option value="heuristic">Heuristic only (offline)</option>
+          <option value="llm">LLM only</option>
+        </select>
+      </div>
+    </section>
   );
 }
 

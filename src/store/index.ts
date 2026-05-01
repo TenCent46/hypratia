@@ -27,6 +27,10 @@ const defaultSettings: Settings = {
   viewportByConversation: {},
   theme: 'light',
   providers: {},
+  canvasWheelMode: 'pan',
+  themesClassifier: 'auto',
+  markdownAutoSave: true,
+  incognitoUnprojectedChats: false,
 };
 
 export type HydrationData = {
@@ -56,6 +60,8 @@ type UI = {
   shortcutsOpen: boolean;
   pdfViewerAttachmentId: ID | null;
   quickCaptureOpen: boolean;
+  graphImportOpen: boolean;
+  workspaceConfigOpen: boolean;
   detachedEditorNodeId: ID | null;
   /** Node currently being edited inline on the canvas; null when none. */
   editingNodeId: ID | null;
@@ -99,12 +105,22 @@ type State = {
   toggleConversationVisible: (id: ID) => void;
   setAllProjectsVisible: (visible: boolean) => void;
   setCanvasTool: (tool: CanvasTool) => void;
+  setCanvasWheelMode: (mode: 'pan' | 'zoom') => void;
+  setThemesClassifier: (mode: 'auto' | 'heuristic' | 'llm') => void;
 
   createConversation: (title?: string, projectId?: ID) => ID;
   ensureConversation: () => ID;
   setActiveConversation: (id: ID) => void;
   renameConversation: (id: ID, title: string) => void;
   removeConversation: (id: ID) => void;
+  /**
+   * Hide a conversation from the inline chat tab bar. Non-destructive —
+   * the chat history stays in the library; activating it (from the sidebar
+   * or command palette) restores the tab via `setActiveConversation`.
+   */
+  hideChatTab: (id: ID) => void;
+  /** Reveal a hidden tab without activating it. */
+  showChatTab: (id: ID) => void;
   markConversationKind: (id: ID, kind: ConversationKind) => void;
 
   addMessage: (
@@ -166,6 +182,9 @@ type State = {
   setDefaultModel: (model: ModelRef | undefined) => void;
   setSystemPrompt: (prompt: string | undefined) => void;
   setEditorMode: (mode: EditorMode) => void;
+  setMarkdownAutoSave: (enabled: boolean) => void;
+  setIncognitoUnprojectedChats: (enabled: boolean) => void;
+  setSuppressDuplicateChatNodeWarning: (enabled: boolean) => void;
   setArtifactSettings: (
     patch: Partial<NonNullable<Settings['artifacts']>>,
   ) => void;
@@ -182,6 +201,8 @@ type State = {
   setShortcutsOpen: (open: boolean) => void;
   setPdfViewer: (attachmentId: ID | null) => void;
   setQuickCaptureOpen: (open: boolean) => void;
+  setGraphImportOpen: (open: boolean) => void;
+  setWorkspaceConfigOpen: (open: boolean) => void;
   setDetachedEditorNodeId: (id: ID | null) => void;
   openAiPalette: (selection: string, origin: string | null) => void;
   closeAiPalette: () => void;
@@ -200,6 +221,8 @@ const defaultUI: UI = {
   shortcutsOpen: false,
   pdfViewerAttachmentId: null,
   quickCaptureOpen: false,
+  graphImportOpen: false,
+  workspaceConfigOpen: false,
   detachedEditorNodeId: null,
   editingNodeId: null,
   aiPalette: null,
@@ -410,6 +433,16 @@ export const useStore = create<State>()(
         },
       })),
 
+    setCanvasWheelMode: (mode) =>
+      set((s) => ({
+        settings: { ...s.settings, canvasWheelMode: mode },
+      })),
+
+    setThemesClassifier: (mode) =>
+      set((s) => ({
+        settings: { ...s.settings, themesClassifier: mode },
+      })),
+
     createConversation: (title = 'Untitled', projectId) => {
       const id = newId();
       const t = now();
@@ -436,16 +469,74 @@ export const useStore = create<State>()(
     },
 
     setActiveConversation: (id) =>
-      set((s) => ({
-        settings: { ...s.settings, lastConversationId: id },
-        ui: {
-          ...s.ui,
-          selectedNodeId: null,
-          selectedNodeIds: [],
-          selectedEdgeIds: [],
-          activeRightTab: 'chat',
-        },
-      })),
+      set((s) => {
+        // Activating a hidden tab brings it back into the inline tab bar.
+        // Without this, clicking a chat in the sidebar that the user had
+        // previously "×"'d would leave them with the chat panel showing
+        // its messages but no corresponding tab — confusing and easy to
+        // mistake for a phantom state.
+        const prevHidden = s.settings.hiddenChatTabIds ?? [];
+        const nextHidden = prevHidden.includes(id)
+          ? prevHidden.filter((x) => x !== id)
+          : prevHidden;
+        return {
+          settings: {
+            ...s.settings,
+            lastConversationId: id,
+            ...(nextHidden !== prevHidden
+              ? { hiddenChatTabIds: nextHidden }
+              : null),
+          },
+          ui: {
+            ...s.ui,
+            selectedNodeId: null,
+            selectedNodeIds: [],
+            selectedEdgeIds: [],
+            activeRightTab: 'chat',
+          },
+        };
+      }),
+
+    hideChatTab: (id) =>
+      set((s) => {
+        const prev = s.settings.hiddenChatTabIds ?? [];
+        if (prev.includes(id)) return {};
+        // If the user is hiding the active tab, switch to another visible
+        // one in the same scope so the chat panel doesn't keep rendering
+        // a tab that's no longer in the strip.
+        const closing = s.conversations.find((c) => c.id === id);
+        const nextHidden = [...prev, id];
+        let nextLastId = s.settings.lastConversationId;
+        if (s.settings.lastConversationId === id) {
+          const scopeId = closing?.projectId;
+          const candidate = s.conversations.find(
+            (c) =>
+              c.id !== id &&
+              !nextHidden.includes(c.id) &&
+              (scopeId ? c.projectId === scopeId : !c.projectId),
+          );
+          nextLastId = candidate?.id;
+        }
+        return {
+          settings: {
+            ...s.settings,
+            hiddenChatTabIds: nextHidden,
+            lastConversationId: nextLastId,
+          },
+        };
+      }),
+
+    showChatTab: (id) =>
+      set((s) => {
+        const prev = s.settings.hiddenChatTabIds ?? [];
+        if (!prev.includes(id)) return {};
+        return {
+          settings: {
+            ...s.settings,
+            hiddenChatTabIds: prev.filter((x) => x !== id),
+          },
+        };
+      }),
 
     renameConversation: (id, title) =>
       set((s) => ({
@@ -512,6 +603,9 @@ export const useStore = create<State>()(
             viewportByConversation: remainingViewports,
             inboxConversationId: inboxId,
             recentlyClosedConversations: nextRing,
+            hiddenChatTabIds: (s.settings.hiddenChatTabIds ?? []).filter(
+              (x) => x !== id,
+            ),
           },
         };
       }),
@@ -845,6 +939,22 @@ export const useStore = create<State>()(
     setEditorMode: (mode) =>
       set((s) => ({ settings: { ...s.settings, editorMode: mode } })),
 
+    setMarkdownAutoSave: (enabled) =>
+      set((s) => ({ settings: { ...s.settings, markdownAutoSave: enabled } })),
+
+    setIncognitoUnprojectedChats: (enabled) =>
+      set((s) => ({
+        settings: { ...s.settings, incognitoUnprojectedChats: enabled },
+      })),
+
+    setSuppressDuplicateChatNodeWarning: (enabled) =>
+      set((s) => ({
+        settings: {
+          ...s.settings,
+          suppressDuplicateChatNodeWarning: enabled,
+        },
+      })),
+
     selectNode: (id) =>
       set((s) => ({
         ui: {
@@ -900,6 +1010,12 @@ export const useStore = create<State>()(
 
     setQuickCaptureOpen: (open) =>
       set((s) => ({ ui: { ...s.ui, quickCaptureOpen: open } })),
+
+    setGraphImportOpen: (open) =>
+      set((s) => ({ ui: { ...s.ui, graphImportOpen: open } })),
+
+    setWorkspaceConfigOpen: (open) =>
+      set((s) => ({ ui: { ...s.ui, workspaceConfigOpen: open } })),
 
     setDetachedEditorNodeId: (id) =>
       set((s) => ({ ui: { ...s.ui, detachedEditorNodeId: id } })),

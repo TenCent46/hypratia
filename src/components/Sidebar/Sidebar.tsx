@@ -4,6 +4,37 @@ import { confirmDangerTwice } from '../../lib/confirm';
 import type { Conversation, ID, Project } from '../../types';
 import { MarkdownFileExplorer } from '../../features/knowledge/MarkdownFileExplorer';
 
+// Stroked black-and-white icons for the sidebar. Inline SVG so we don't
+// inherit an emoji font's rendering quirks; the path strokes pick up
+// `currentColor` and stay legible across light / dark / sepia themes.
+const SIDEBAR_ICON_PROPS = {
+  width: 14,
+  height: 14,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.6,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+};
+
+function FolderIcon() {
+  return (
+    <svg {...SIDEBAR_ICON_PROPS}>
+      <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+    </svg>
+  );
+}
+
+function ChatBubbleIcon() {
+  return (
+    <svg {...SIDEBAR_ICON_PROPS}>
+      <path d="M4 5h16a1 1 0 011 1v10a1 1 0 01-1 1h-9l-4 3v-3H4a1 1 0 01-1-1V6a1 1 0 011-1z" />
+    </svg>
+  );
+}
+
 export function Sidebar({
   activeMarkdownPath,
   onOpenMarkdownFile,
@@ -43,12 +74,14 @@ export function Sidebar({
   const removeProject = useStore((s) => s.removeProject);
   const toggleProjectExpanded = useStore((s) => s.toggleProjectExpanded);
   const setSearchOpen = useStore((s) => s.setSearchOpen);
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen);
 
   const [renamingChatId, setRenamingChatId] = useState<ID | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<ID | null>(null);
   const [draft, setDraft] = useState('');
-  const [filter, setFilter] = useState('');
+  const [defaultExpanded, setDefaultExpanded] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<'projects' | 'explorer'>(
+    'projects',
+  );
   const [sidebarMenu, setSidebarMenu] = useState<{ x: number; y: number } | null>(null);
   const sidebarMenuRef = useRef<HTMLDivElement>(null);
 
@@ -66,16 +99,11 @@ export function Sidebar({
     () =>
       [...conversations]
         .filter((c) => !c.projectId)
-        .filter((c) =>
-          filter
-            ? c.title.toLowerCase().includes(filter.toLowerCase())
-            : true,
-        )
         .sort(
           (a, b) =>
             new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
         ),
-    [conversations, filter],
+    [conversations],
   );
 
   const projectConversations = useMemo(() => {
@@ -160,15 +188,6 @@ export function Sidebar({
           ⌕
         </button>
         <span className="sidebar-spacer" />
-        <button
-          type="button"
-          className="sidebar-icon-btn"
-          onClick={() => setSettingsOpen(true)}
-          aria-label="Settings"
-          title="Settings"
-        >
-          ⚙
-        </button>
         {sidebarMenu ? (
           <SidebarDockMenu
             refEl={sidebarMenuRef}
@@ -227,14 +246,36 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar-section">
-        <MarkdownFileExplorer
-          activePath={activeMarkdownPath ?? null}
-          onOpenFile={(path) => onOpenMarkdownFile?.(path)}
-        />
+      <div className="sidebar-tabs" role="tablist" aria-label="Sidebar sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={sidebarTab === 'projects'}
+          className={`sidebar-tab${sidebarTab === 'projects' ? ' active' : ''}`}
+          onClick={() => setSidebarTab('projects')}
+        >
+          Projects
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={sidebarTab === 'explorer'}
+          className={`sidebar-tab${sidebarTab === 'explorer' ? ' active' : ''}`}
+          onClick={() => setSidebarTab('explorer')}
+        >
+          Files
+        </button>
       </div>
 
-      <div className="sidebar-section">
+      {sidebarTab === 'explorer' ? (
+        <div className="sidebar-section sidebar-section-fill">
+          <MarkdownFileExplorer
+            activePath={activeMarkdownPath ?? null}
+            onOpenFile={(path) => onOpenMarkdownFile?.(path)}
+          />
+        </div>
+      ) : (
+        <div className="sidebar-section sidebar-section-fill">
         <div className="sidebar-section-header">
           <span>Projects</span>
           <button
@@ -244,12 +285,47 @@ export function Sidebar({
             aria-label="New project"
             title="New project"
           >
-            ＋
+            +
           </button>
         </div>
-        {projects.length === 0 ? null : (
-          <div className="sidebar-projects">
-            {projects.map((p) => (
+        <div className="sidebar-projects">
+          <DefaultProjectRow
+            expanded={defaultExpanded}
+            onToggle={() => setDefaultExpanded((v) => !v)}
+            onAddChat={() => onNewChat()}
+            conversations={orphanConversations}
+            activeId={activeId}
+            onActivate={(id) => setActive(id)}
+            renamingChatId={renamingChatId}
+            onChatRename={(id) => {
+              const c = conversations.find((x) => x.id === id);
+              setRenamingChatId(id);
+              setDraft(c?.title ?? '');
+            }}
+            onChatCommitRename={commitChatRename}
+            onChatCancelRename={() => {
+              setRenamingChatId(null);
+              setDraft('');
+            }}
+            onChatDraftChange={setDraft}
+            chatDraft={draft}
+            onChatDelete={(c) => {
+              if (
+                confirmDangerTwice({
+                  title: `Delete conversation "${c.title}"?`,
+                  detail:
+                    'This will remove the conversation, its messages, canvas nodes, and connected edges.',
+                  finalDetail:
+                    'Second confirmation: permanently delete this conversation?',
+                })
+              ) {
+                removeConversation(c.id);
+              }
+            }}
+            projects={projects}
+            onChatMoveTo={(cid, pid) => setConversationProject(cid, pid)}
+          />
+          {projects.map((p) => (
               <ProjectRow
                 key={p.id}
                 project={p}
@@ -320,77 +396,10 @@ export function Sidebar({
                 onChatMoveTo={(cid, pid) => setConversationProject(cid, pid)}
               />
             ))}
-          </div>
-        )}
-      </div>
+        </div>
+        </div>
+      )}
 
-      <div className="sidebar-section sidebar-section-recents">
-        <div className="sidebar-section-header">
-          <span>Chats</span>
-        </div>
-        <div className="sidebar-search">
-          <input
-            type="text"
-            placeholder="Filter chats…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-        </div>
-        <div className="sidebar-chat-list">
-          {orphanConversations.length === 0 ? (
-            <div className="sidebar-empty">
-              {filter ? 'No matches.' : 'No chats yet.'}
-            </div>
-          ) : (
-            orphanConversations.map((c) => (
-              <ChatRow
-                key={c.id}
-                conversation={c}
-                active={c.id === activeId}
-                renaming={renamingChatId === c.id}
-                draft={draft}
-                onActivate={() => setActive(c.id)}
-                onStartRename={() => {
-                  setRenamingChatId(c.id);
-                  setDraft(c.title);
-                }}
-                onCommitRename={() => commitChatRename(c.id)}
-                onCancelRename={() => {
-                  setRenamingChatId(null);
-                  setDraft('');
-                }}
-                onDraftChange={setDraft}
-                onDelete={() => {
-                  if (
-                    confirmDangerTwice({
-                      title: `Delete conversation "${c.title}"?`,
-                      detail:
-                        'This will remove the conversation, its messages, canvas nodes, and connected edges.',
-                      finalDetail:
-                        'Second confirmation: permanently delete this conversation?',
-                    })
-                  ) {
-                    removeConversation(c.id);
-                  }
-                }}
-                projects={projects}
-                onMoveTo={(pid) => setConversationProject(c.id, pid)}
-              />
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className="sidebar-bottom">
-        <button
-          type="button"
-          className="sidebar-row sidebar-action"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <span className="sidebar-row-icon">⚙</span>
-          <span className="sidebar-row-label">Settings</span>
-        </button>
-      </div>
       {sidebarMenu ? (
         <SidebarDockMenu
           refEl={sidebarMenuRef}
@@ -453,6 +462,98 @@ function SidebarDockMenu({
   );
 }
 
+function DefaultProjectRow({
+  expanded,
+  onToggle,
+  onAddChat,
+  conversations,
+  activeId,
+  onActivate,
+  renamingChatId,
+  onChatRename,
+  onChatCommitRename,
+  onChatCancelRename,
+  onChatDraftChange,
+  chatDraft,
+  onChatDelete,
+  projects,
+  onChatMoveTo,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  onAddChat: () => void;
+  conversations: Conversation[];
+  activeId: ID | undefined;
+  onActivate: (id: ID) => void;
+  renamingChatId: ID | null;
+  onChatRename: (id: ID) => void;
+  onChatCommitRename: (id: ID) => void;
+  onChatCancelRename: () => void;
+  onChatDraftChange: (v: string) => void;
+  chatDraft: string;
+  onChatDelete: (c: Conversation) => void;
+  projects: Project[];
+  onChatMoveTo: (conversationId: ID, projectId: ID | null) => void;
+}) {
+  return (
+    <div className={`sidebar-project sidebar-project-default${expanded ? ' expanded' : ''}`}>
+      <div className="sidebar-project-header">
+        <button
+          type="button"
+          className="sidebar-project-toggle"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
+          <span className="sidebar-project-caret">{expanded ? '▾' : '▸'}</span>
+          <span className="sidebar-project-icon">
+            <ChatBubbleIcon />
+          </span>
+          <span className="sidebar-project-name">Chats</span>
+        </button>
+        <div className="sidebar-project-actions">
+          <button
+            type="button"
+            className="sidebar-icon-btn small"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddChat();
+            }}
+            aria-label="New chat"
+            title="New chat"
+          >
+            +
+          </button>
+        </div>
+      </div>
+      {expanded ? (
+        <div className="sidebar-project-children">
+          {conversations.length === 0 ? (
+            <div className="sidebar-empty small">No chats yet.</div>
+          ) : (
+            conversations.map((c) => (
+              <ChatRow
+                key={c.id}
+                conversation={c}
+                active={c.id === activeId}
+                renaming={renamingChatId === c.id}
+                draft={chatDraft}
+                onActivate={() => onActivate(c.id)}
+                onStartRename={() => onChatRename(c.id)}
+                onCommitRename={() => onChatCommitRename(c.id)}
+                onCancelRename={onChatCancelRename}
+                onDraftChange={onChatDraftChange}
+                onDelete={() => onChatDelete(c)}
+                projects={projects}
+                onMoveTo={(pid) => onChatMoveTo(c.id, pid)}
+              />
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ProjectRow({
   project,
   expanded,
@@ -504,31 +605,35 @@ function ProjectRow({
   projects: Project[];
   onChatMoveTo: (conversationId: ID, projectId: ID | null) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onDoc(e: MouseEvent) {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    }
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [menuOpen]);
+  function onHeaderContextMenu(e: React.MouseEvent) {
+    if (renaming) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  }
 
   return (
-    <div className={`sidebar-project${expanded ? ' expanded' : ''}`}>
+    <div
+      className={`sidebar-project${expanded ? ' expanded' : ''}`}
+      onContextMenu={onHeaderContextMenu}
+    >
       <div className="sidebar-project-header">
         <button
           type="button"
           className="sidebar-project-toggle"
           onClick={onToggle}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onRename();
+          }}
           aria-expanded={expanded}
+          title={renaming ? undefined : 'Double-click to rename · Right-click for more'}
         >
           <span className="sidebar-project-caret">{expanded ? '▾' : '▸'}</span>
           <span className="sidebar-project-icon">
-            {project.emoji || '📁'}
+            {project.emoji ? project.emoji : <FolderIcon />}
           </span>
           {renaming ? (
             <input
@@ -547,7 +652,7 @@ function ProjectRow({
             <span className="sidebar-project-name">{project.name}</span>
           )}
         </button>
-        <div className="sidebar-project-actions" ref={menuRef}>
+        <div className="sidebar-project-actions">
           <button
             type="button"
             className="sidebar-icon-btn small"
@@ -558,44 +663,37 @@ function ProjectRow({
             aria-label="New chat in project"
             title="New chat in project"
           >
-            ＋
+            +
           </button>
-          <button
-            type="button"
-            className="sidebar-icon-btn small"
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen((v) => !v);
-            }}
-            aria-label="Project menu"
-            title="More"
-          >
-            ⋯
-          </button>
-          {menuOpen ? (
-            <div className="sidebar-menu">
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onRename();
-                }}
-              >
-                Rename
-              </button>
-              <button
-                type="button"
-                className="danger"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onDelete();
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          ) : null}
         </div>
+        {ctxMenu ? (
+          <SidebarRowContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            onClose={() => setCtxMenu(null)}
+          >
+            <button
+              type="button"
+              className="app-context-menu-item"
+              onClick={() => {
+                setCtxMenu(null);
+                onRename();
+              }}
+            >
+              <span className="app-context-menu-label">Rename</span>
+            </button>
+            <button
+              type="button"
+              className="app-context-menu-item danger"
+              onClick={() => {
+                setCtxMenu(null);
+                onDelete();
+              }}
+            >
+              <span className="app-context-menu-label">Delete project</span>
+            </button>
+          </SidebarRowContextMenu>
+        ) : null}
       </div>
       {expanded ? (
         <div className="sidebar-project-children">
@@ -659,28 +757,23 @@ function ChatRow({
   onMoveTo: (projectId: ID | null) => void;
   inProject?: boolean;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onDoc(e: MouseEvent) {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-        setMoveOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [menuOpen]);
+  function onRowContextMenu(e: React.MouseEvent) {
+    if (renaming) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMoveOpen(false);
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  }
 
   return (
     <div
       className={`sidebar-chat${active ? ' active' : ''}${
         inProject ? ' nested' : ''
       }`}
+      onContextMenu={onRowContextMenu}
     >
       {renaming ? (
         <input
@@ -700,89 +793,135 @@ function ChatRow({
           className="sidebar-chat-pick"
           onClick={onActivate}
           onDoubleClick={onStartRename}
-          title={conversation.title}
+          title={`${conversation.title} — double-click to rename · right-click for more`}
         >
           {conversation.kind === 'inbox' ? '📥 ' : conversation.kind === 'daily' ? '🗓 ' : ''}
           {conversation.title}
         </button>
       )}
-      <div className="sidebar-chat-actions" ref={menuRef}>
-        <button
-          type="button"
-          className="sidebar-icon-btn small"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen((v) => !v);
+      {ctxMenu ? (
+        <SidebarRowContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => {
+            setCtxMenu(null);
             setMoveOpen(false);
           }}
-          aria-label="Chat menu"
-          title="More"
         >
-          ⋯
-        </button>
-        {menuOpen ? (
-          <div className="sidebar-menu">
-            <button
-              type="button"
-              onClick={() => {
-                setMenuOpen(false);
-                onStartRename();
-              }}
-            >
-              Rename
-            </button>
-            <button
-              type="button"
-              onClick={() => setMoveOpen((v) => !v)}
-            >
+          <button
+            type="button"
+            className="app-context-menu-item"
+            onClick={() => {
+              setCtxMenu(null);
+              onStartRename();
+            }}
+          >
+            <span className="app-context-menu-label">Rename</span>
+          </button>
+          <button
+            type="button"
+            className="app-context-menu-item"
+            onClick={() => setMoveOpen((v) => !v)}
+          >
+            <span className="app-context-menu-label">
               Move to… {moveOpen ? '▾' : '▸'}
-            </button>
-            {moveOpen ? (
-              <div className="sidebar-submenu">
-                {inProject ? (
+            </span>
+          </button>
+          {moveOpen ? (
+            <div className="sidebar-submenu">
+              {inProject ? (
+                <button
+                  type="button"
+                  className="app-context-menu-item"
+                  onClick={() => {
+                    setCtxMenu(null);
+                    onMoveTo(null);
+                  }}
+                >
+                  <span className="app-context-menu-label">(No project)</span>
+                </button>
+              ) : null}
+              {projects
+                .filter((p) => p.id !== conversation.projectId)
+                .map((p) => (
                   <button
+                    key={p.id}
                     type="button"
+                    className="app-context-menu-item"
                     onClick={() => {
-                      setMenuOpen(false);
-                      onMoveTo(null);
+                      setCtxMenu(null);
+                      onMoveTo(p.id);
                     }}
                   >
-                    (No project)
-                  </button>
-                ) : null}
-                {projects
-                  .filter((p) => p.id !== conversation.projectId)
-                  .map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onMoveTo(p.id);
-                      }}
-                    >
+                    <span className="app-context-menu-label">
                       {p.emoji ? `${p.emoji} ` : ''}
                       {p.name}
-                    </button>
-                  ))}
-                {projects.length === 0 ? (
-                  <div className="sidebar-empty small">No projects yet.</div>
-                ) : null}
-              </div>
-            ) : null}
-            <button
-              type="button"
-              className="danger"
-              onClick={() => {
-                setMenuOpen(false);
-                onDelete();
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        ) : null}
-      </div>
+                    </span>
+                  </button>
+                ))}
+              {projects.length === 0 ? (
+                <div className="sidebar-empty small">No projects yet.</div>
+              ) : null}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="app-context-menu-item danger"
+            onClick={() => {
+              setCtxMenu(null);
+              onDelete();
+            }}
+          >
+            <span className="app-context-menu-label">Delete chat</span>
+          </button>
+        </SidebarRowContextMenu>
+      ) : null}
     </div>
   );
 }
+
+/**
+ * Floating context menu used by both ProjectRow and ChatRow. Positions at
+ * (x, y) clamped to viewport, dismisses on outside-click or Escape.
+ */
+function SidebarRowContextMenu({
+  x,
+  y,
+  onClose,
+  children,
+}: {
+  x: number;
+  y: number;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', onDoc, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+  const left = Math.min(x, window.innerWidth - 220);
+  const top = Math.min(y, window.innerHeight - 180);
+  return (
+    <div
+      ref={ref}
+      className="app-context-menu"
+      style={{ position: 'fixed', left, top, zIndex: 220 }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {children}
+    </div>
+  );
+}
+

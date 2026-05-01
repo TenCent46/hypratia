@@ -128,9 +128,9 @@ export function EditorSidePanel({
             role="tab"
             aria-selected={tab === item.id}
             title={item.label}
+            aria-label={item.label}
           >
             <SideIcon icon={item.icon} />
-            <span className="editor-side-label">{item.label}</span>
           </button>
         ))}
         <button

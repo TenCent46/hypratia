@@ -6,8 +6,11 @@ import { attachments } from '../../services/attachments';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import type { Attachment, CanvasNode, PdfRef } from '../../types';
+// Bundle the pdf.js worker through Vite so its version always matches
+// the installed `pdfjs-dist` (the API and worker must match exactly).
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 type SelectionState = {
   page: number;
