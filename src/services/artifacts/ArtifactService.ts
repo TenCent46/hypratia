@@ -1,0 +1,538 @@
+import { attachments as attachmentService } from '../attachments';
+import { useStore } from '../../store';
+import type { ID } from '../../types';
+import {
+  audioMime,
+  documentFormatMeta,
+  extensionFromFilename,
+  isTextSafeExtension,
+  normalizeFilename,
+  textMimeForExtension,
+} from './filenames';
+import { mirrorSidecar, mirrorTextArtifact } from './knowledgeBaseMirror';
+import type {
+  ArtifactProvider,
+  ArtifactProviderId,
+  ArtifactRequest,
+  ArtifactResult,
+  ArtifactResultErr,
+  ArtifactResultOk,
+  AudioFormat,
+  ProviderUsage,
+} from './types';
+
+const TEXT_TAG = 'ai-generated';
+
+export type ArtifactProgressDetail =
+  | {
+      phase: 'start';
+      generationId: string;
+      kind: 'document' | 'audio' | 'video';
+      provider: ArtifactProviderId;
+      filename: string;
+      conversationId: string;
+    }
+  | {
+      phase: 'success';
+      generationId: string;
+      kind: 'document' | 'audio' | 'video';
+      provider: ArtifactProviderId;
+      filename: string;
+      conversationId: string;
+      sizeBytes: number;
+    }
+  | {
+      phase: 'error';
+      generationId: string;
+      kind: 'document' | 'audio' | 'video';
+      provider?: ArtifactProviderId;
+      filename: string;
+      conversationId: string;
+      error: string;
+    };
+
+function emitProgress(detail: ArtifactProgressDetail) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent<ArtifactProgressDetail>('mc:artifact-progress', {
+        detail,
+      }),
+    );
+  } catch {
+    // window unavailable; fail silently
+  }
+}
+
+function genId(): string {
+  return `gen-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Per-conversation buffer of artifact ids the chat stream should attach to
+ * the just-finalized assistant message. The chat stream hook drains this
+ * after the stream completes and patches `message.attachmentIds`.
+ */
+const pendingByConversation = new Map<string, string[]>();
+
+export function drainPendingArtifacts(conversationId: string): string[] {
+  const buf = pendingByConversation.get(conversationId);
+  if (!buf || buf.length === 0) return [];
+  pendingByConversation.delete(conversationId);
+  return buf;
+}
+
+function recordPending(conversationId: string, attachmentId: string) {
+  const buf = pendingByConversation.get(conversationId) ?? [];
+  buf.push(attachmentId);
+  pendingByConversation.set(conversationId, buf);
+}
+
+export class ArtifactService {
+  constructor(
+    private readonly providers: {
+      claudeDocument: ArtifactProvider;
+      openaiDocument: ArtifactProvider;
+      openaiAudio: ArtifactProvider;
+      openaiVideo: ArtifactProvider;
+    },
+  ) {}
+
+  async create(req: ArtifactRequest): Promise<ArtifactResult> {
+    try {
+      switch (req.kind) {
+        case 'text':
+          return await this.createText(req);
+        case 'document':
+          return await this.createDocument(req);
+        case 'audio':
+          return await this.createAudio(req);
+        case 'video':
+          return await this.createVideo(req);
+      }
+    } catch (err) {
+      return errorOf(err);
+    }
+  }
+
+  // ---- text ----
+  private async createText(
+    req: Extract<ArtifactRequest, { kind: 'text' }>,
+  ): Promise<ArtifactResult> {
+    const { filename, extension } = normalizeFilename(req.filename);
+    if (!extension) {
+      return {
+        ok: false,
+        error: 'text artifact requires an extension (e.g. .md)',
+        provider: 'host-text',
+      };
+    }
+    if (!isTextSafeExtension(extension)) {
+      return {
+        ok: false,
+        error: `extension ".${extension}" is not text-safe; use create_document_artifact for binary formats`,
+        provider: 'host-text',
+      };
+    }
+    const mimeType = req.mimeType ?? textMimeForExtension(extension);
+    const bytes = new TextEncoder().encode(req.textContent);
+    return await this.commit({
+      bytes,
+      mimeType,
+      filename,
+      extension,
+      provider: 'host-text',
+      kind: 'text',
+      conversationId: req.conversationId,
+      sourceMessageId: req.sourceMessageId,
+      title: req.title,
+      saveToKnowledgeBase: req.saveToKnowledgeBase ?? extension === 'md',
+      createCanvasNode: req.createCanvasNode ?? extension === 'md',
+      textContentForCanvas:
+        extension === 'md' || extension === 'markdown' || extension === 'mdx'
+          ? req.textContent
+          : undefined,
+      usage: { characters: req.textContent.length },
+    });
+  }
+
+  // ---- documents ----
+  private async createDocument(
+    req: Extract<ArtifactRequest, { kind: 'document' }>,
+  ): Promise<ArtifactResult> {
+    const meta = documentFormatMeta(req.format);
+    const { filename } = normalizeFilename(req.filename, meta.ext);
+    const order = this.documentProviderOrder(req.providerHint);
+    const generationId = genId();
+    let lastErr: string | undefined;
+    for (const provider of order) {
+      if (!(await provider.isAvailable())) {
+        lastErr = `${provider.id} unavailable`;
+        continue;
+      }
+      emitProgress({
+        phase: 'start',
+        generationId,
+        kind: 'document',
+        provider: provider.id,
+        filename,
+        conversationId: req.conversationId,
+      });
+      try {
+        const out = await provider.generate({
+          prompt: req.prompt,
+          filename,
+          format: req.format,
+        });
+        const result = await this.commit({
+          bytes: out.bytes,
+          mimeType: out.mimeType || meta.mime,
+          filename: out.filename || filename,
+          extension: meta.ext,
+          provider: provider.id,
+          kind: 'document',
+          conversationId: req.conversationId,
+          sourceMessageId: req.sourceMessageId,
+          title: req.title,
+          saveToKnowledgeBase: req.saveToKnowledgeBase ?? true,
+          createCanvasNode: req.createCanvasNode ?? true,
+          format: req.format,
+          usage: out.usage,
+        });
+        emitProgress({
+          phase: 'success',
+          generationId,
+          kind: 'document',
+          provider: provider.id,
+          filename: result.filename,
+          conversationId: req.conversationId,
+          sizeBytes: result.sizeBytes,
+        });
+        return result;
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : String(err);
+        emitProgress({
+          phase: 'error',
+          generationId,
+          kind: 'document',
+          provider: provider.id,
+          filename,
+          conversationId: req.conversationId,
+          error: lastErr,
+        });
+      }
+    }
+    return {
+      ok: false,
+      error:
+        lastErr ??
+        'no document provider available (configure an Anthropic or OpenAI key in Settings)',
+    };
+  }
+
+  // ---- audio ----
+  private async createAudio(
+    req: Extract<ArtifactRequest, { kind: 'audio' }>,
+  ): Promise<ArtifactResult> {
+    const provider = this.providers.openaiAudio;
+    if (!(await provider.isAvailable())) {
+      return {
+        ok: false,
+        error: 'OpenAI key not configured for audio generation',
+        provider: provider.id,
+      };
+    }
+    const format: AudioFormat = req.format ?? 'mp3';
+    const { filename } = normalizeFilename(req.filename, format);
+    const promptPayload = JSON.stringify({
+      text: req.text,
+      voice: req.voice,
+      instructions: req.instructions,
+      format,
+    });
+    const generationId = genId();
+    emitProgress({
+      phase: 'start',
+      generationId,
+      kind: 'audio',
+      provider: provider.id,
+      filename,
+      conversationId: req.conversationId,
+    });
+    let out;
+    try {
+      out = await provider.generate({
+        prompt: promptPayload,
+        filename,
+        format,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      emitProgress({
+        phase: 'error',
+        generationId,
+        kind: 'audio',
+        provider: provider.id,
+        filename,
+        conversationId: req.conversationId,
+        error: message,
+      });
+      throw err;
+    }
+    const result = await this.commit({
+      bytes: out.bytes,
+      mimeType: out.mimeType || audioMime(format),
+      filename: out.filename || filename,
+      extension: format,
+      provider: provider.id,
+      kind: 'audio',
+      conversationId: req.conversationId,
+      sourceMessageId: req.sourceMessageId,
+      title: req.title,
+      saveToKnowledgeBase: req.saveToKnowledgeBase ?? true,
+      createCanvasNode: req.createCanvasNode ?? true,
+      format,
+      usage: out.usage,
+    });
+    emitProgress({
+      phase: 'success',
+      generationId,
+      kind: 'audio',
+      provider: provider.id,
+      filename: result.filename,
+      conversationId: req.conversationId,
+      sizeBytes: result.sizeBytes,
+    });
+    return result;
+  }
+
+  // ---- video ----
+  private async createVideo(
+    req: Extract<ArtifactRequest, { kind: 'video' }>,
+  ): Promise<ArtifactResult> {
+    const settings = useStore.getState().settings;
+    if (!settings.artifacts?.videoEnabled) {
+      return {
+        ok: false,
+        error:
+          'video generation is disabled (Settings → Vault & data → Enable video generation)',
+        provider: 'openai-video',
+      };
+    }
+    const provider = this.providers.openaiVideo;
+    if (!(await provider.isAvailable())) {
+      return {
+        ok: false,
+        error: 'OpenAI key not configured for video generation',
+        provider: provider.id,
+      };
+    }
+    const { filename } = normalizeFilename(req.filename, 'mp4');
+    const generationId = genId();
+    emitProgress({
+      phase: 'start',
+      generationId,
+      kind: 'video',
+      provider: provider.id,
+      filename,
+      conversationId: req.conversationId,
+    });
+    let out;
+    try {
+      out = await provider.generate({
+        prompt: JSON.stringify({
+          prompt: req.prompt,
+          seconds: req.seconds,
+          size: req.size,
+        }),
+        filename,
+        format: 'mp4',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      emitProgress({
+        phase: 'error',
+        generationId,
+        kind: 'video',
+        provider: provider.id,
+        filename,
+        conversationId: req.conversationId,
+        error: message,
+      });
+      throw err;
+    }
+    const result = await this.commit({
+      bytes: out.bytes,
+      mimeType: out.mimeType || 'video/mp4',
+      filename: out.filename || filename,
+      extension: 'mp4',
+      provider: provider.id,
+      kind: 'video',
+      conversationId: req.conversationId,
+      sourceMessageId: req.sourceMessageId,
+      title: req.title,
+      saveToKnowledgeBase: req.saveToKnowledgeBase ?? true,
+      createCanvasNode: req.createCanvasNode ?? true,
+      usage: out.usage,
+    });
+    emitProgress({
+      phase: 'success',
+      generationId,
+      kind: 'video',
+      provider: provider.id,
+      filename: result.filename,
+      conversationId: req.conversationId,
+      sizeBytes: result.sizeBytes,
+    });
+    return result;
+  }
+
+  // ---- shared commit ----
+  private async commit(args: {
+    bytes: Uint8Array;
+    mimeType: string;
+    filename: string;
+    extension: string;
+    provider: ArtifactProviderId;
+    kind: 'text' | 'document' | 'audio' | 'video';
+    conversationId: ID;
+    sourceMessageId?: ID;
+    title?: string;
+    saveToKnowledgeBase: boolean;
+    createCanvasNode: boolean;
+    textContentForCanvas?: string;
+    format?: string;
+    usage?: ProviderUsage;
+  }): Promise<ArtifactResultOk> {
+    if (args.bytes.byteLength === 0) {
+      throw new Error('provider returned 0 bytes');
+    }
+    const att = await attachmentService.ingest({
+      kind: 'bytes',
+      bytes: args.bytes,
+      suggestedName: args.filename,
+      mimeType: args.mimeType,
+    });
+    const store = useStore.getState();
+    store.addAttachment(att);
+
+    const createdAt = new Date().toISOString();
+    let nodeId: ID | undefined;
+    if (args.createCanvasNode) {
+      const isMarkdownText =
+        args.kind === 'text' &&
+        (args.extension === 'md' ||
+          args.extension === 'markdown' ||
+          args.extension === 'mdx');
+      const node = store.addNode({
+        conversationId: args.conversationId,
+        kind: isMarkdownText ? 'markdown' : 'artifact',
+        title: args.title ?? args.filename,
+        contentMarkdown:
+          args.textContentForCanvas ??
+          `**${args.filename}** · ${formatBytes(args.bytes.byteLength)} · ${args.provider}`,
+        position: { x: 240, y: 240 },
+        tags: [TEXT_TAG, args.provider, args.kind, args.extension],
+        attachmentIds: [att.id],
+      });
+      nodeId = node.id;
+    }
+
+    let knowledgeBasePath: string | undefined;
+    if (args.saveToKnowledgeBase) {
+      try {
+        if (
+          args.kind === 'text' &&
+          (args.extension === 'md' ||
+            args.extension === 'markdown' ||
+            args.extension === 'mdx')
+        ) {
+          knowledgeBasePath = await mirrorTextArtifact({
+            filename: args.filename,
+            content: args.textContentForCanvas ?? '',
+            artifactId: att.id,
+            provider: args.provider,
+            conversationId: args.conversationId,
+            sourceMessageId: args.sourceMessageId,
+            title: args.title,
+            createdAt,
+          });
+        } else if (args.kind !== 'text') {
+          knowledgeBasePath = await mirrorSidecar({
+            basename: stripExt(args.filename),
+            artifactId: att.id,
+            artifactKind: args.kind,
+            extension: args.extension,
+            attachmentRelPath: att.relPath,
+            provider: args.provider,
+            conversationId: args.conversationId,
+            sourceMessageId: args.sourceMessageId,
+            title: args.title,
+            sizeBytes: args.bytes.byteLength,
+            createdAt,
+          });
+        }
+      } catch {
+        // mirror failures are not fatal — surface elsewhere later
+      }
+    }
+
+    recordPending(args.conversationId, att.id);
+    store.recordArtifactUsage({
+      artifactId: att.id,
+      conversationId: args.conversationId,
+      provider: args.provider,
+      kind: args.kind,
+      format: args.format ?? args.extension,
+      filename: args.filename,
+      sizeBytes: args.bytes.byteLength,
+      usage: args.usage,
+      createdAt,
+    });
+    return {
+      ok: true,
+      artifactId: att.id,
+      filename: args.filename,
+      extension: args.extension,
+      mimeType: args.mimeType,
+      attachmentId: att.id,
+      nodeId,
+      knowledgeBasePath,
+      provider: args.provider,
+      sizeBytes: args.bytes.byteLength,
+      sourceConversationId: args.conversationId,
+      sourceMessageId: args.sourceMessageId,
+      createdAt,
+    };
+  }
+
+  private documentProviderOrder(
+    hint: 'claude' | 'openai' | undefined,
+  ): ArtifactProvider[] {
+    const settings = useStore.getState().settings;
+    const preferred =
+      hint ?? settings.artifacts?.documentProvider ?? 'claude';
+    return preferred === 'openai'
+      ? [this.providers.openaiDocument, this.providers.claudeDocument]
+      : [this.providers.claudeDocument, this.providers.openaiDocument];
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function stripExt(name: string): string {
+  const i = name.lastIndexOf('.');
+  return i < 0 ? name : name.slice(0, i);
+}
+
+function errorOf(err: unknown): ArtifactResultErr {
+  const message = err instanceof Error ? err.message : String(err);
+  return { ok: false, error: message };
+}
+
+export type { ArtifactRequest, ArtifactResult, ArtifactProviderId };
+export { extensionFromFilename };

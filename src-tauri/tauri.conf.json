@@ -1,0 +1,64 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Memory Canvas",
+  "version": "1.1.0-beta.1",
+  "identifier": "com.bakerization.memory-canvas",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Memory Canvas",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 720,
+        "minHeight": 520,
+        "resizable": true,
+        "maximizable": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/attachments/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Spatial memory layer for LLM conversations",
+    "longDescription": "Local-first AI thinking workspace: streaming chat on the right, infinite spatial canvas on the left, exports cleanly to Obsidian.",
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "entitlements": null,
+      "exceptionDomain": "",
+      "signingIdentity": null,
+      "providerShortName": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": false,
+      "endpoints": [
+        "https://github.com/your-org/memory-canvas/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBKEY",
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

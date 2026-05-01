@@ -1,0 +1,47 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for all Memory Canvas windows during development",
+  "windows": ["*"],
+  "webviews": ["*"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-emit",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit-to",
+    "core:webview:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir",
+    "opener:allow-open-path",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-copy-file",
+    "fs:allow-mkdir",
+    "fs:allow-rename",
+    "fs:allow-remove",
+    "fs:allow-exists",
+    "fs:allow-read-dir",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/**" }
+      ]
+    },
+    "dialog:default"
+  ]
+}
