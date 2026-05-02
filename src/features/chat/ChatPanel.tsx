@@ -1,5 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type MouseEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChatStream } from './useChatStream';
+import { RichTextContextMenu } from '../../components/ContextMenu/RichTextContextMenu';
+import { showToast } from '../../components/Toast/Toast';
 import { ChatHeader } from './ChatHeader';
 import { ChatTabBar } from './ChatTabBar';
 import { MessageInput } from './MessageInput';
@@ -14,9 +17,16 @@ import type { ChatMode } from './useChatStream';
 import type { ModelRef } from '../../types';
 
 export function ChatPanel() {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<ChatMode>('chat');
   const { send, regenerate, abort, streaming } = useChatStream();
   const conversationId = useStore((s) => s.settings.lastConversationId);
+  const [textMenu, setTextMenu] = useState<{
+    x: number;
+    y: number;
+    selectedText: string;
+  } | null>(null);
+  const openAiPalette = useStore((s) => s.openAiPalette);
   const allMessages = useStore((s) => s.messages);
   const conv = useStore((s) =>
     conversationId
@@ -93,8 +103,33 @@ export function ChatPanel() {
     [send, mode],
   );
 
+  function onChatContextMenu(e: MouseEvent<HTMLDivElement>) {
+    // Inputs / textareas keep their own context menus (chat input has
+    // its own RichTextContextMenu wired in MessageInput).
+    const target = e.target as HTMLElement;
+    if (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.isContentEditable
+    ) {
+      return;
+    }
+    const sel = window.getSelection();
+    const selectedText = sel?.toString().trim() ?? '';
+    if (
+      !sel ||
+      sel.rangeCount === 0 ||
+      !selectedText ||
+      !target.closest('.message .content')
+    ) {
+      return;
+    }
+    e.preventDefault();
+    setTextMenu({ x: e.clientX, y: e.clientY, selectedText });
+  }
+
   return (
-    <div className="chat-panel">
+    <div className="chat-panel" onContextMenu={onChatContextMenu}>
       <ChatTabBarSlot />
       <ChatHeader streaming={streaming} onAbort={abort} />
       <MessageList onRegenerate={onRegenerate} />
@@ -107,6 +142,28 @@ export function ChatPanel() {
         onSlashCommand={handleSlash}
       />
       <ArtifactProgressToast />
+      {textMenu ? (
+        <RichTextContextMenu
+          x={textMenu.x}
+          y={textMenu.y}
+          onClose={() => setTextMenu(null)}
+          items={{
+            copy: () => {
+              void navigator.clipboard
+                .writeText(textMenu.selectedText)
+                .then(() =>
+                  showToast({ message: t('common.copied'), tone: 'success' }),
+                )
+                .catch(() => undefined);
+              setTextMenu(null);
+            },
+            ask: () => {
+              openAiPalette(textMenu.selectedText, 'chat-selection');
+              setTextMenu(null);
+            },
+          }}
+        />
+      ) : null}
     </div>
   );
 }

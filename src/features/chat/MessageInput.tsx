@@ -10,6 +10,9 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store';
+import { RichTextContextMenu } from '../../components/ContextMenu/RichTextContextMenu';
+import { showToast } from '../../components/Toast/Toast';
+import { htmlToMarkdown } from '../../services/markdown/htmlToMarkdown';
 import { attachments } from '../../services/attachments';
 import {
   matchSlashCommands,
@@ -63,6 +66,11 @@ export function MessageInput({
 }) {
   const { t } = useTranslation();
   const [text, setText] = useState('');
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    hasSelection: boolean;
+  } | null>(null);
   const [pending, setPending] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -294,6 +302,98 @@ export function MessageInput({
 
   const canSend = !streaming && (text.trim().length > 0 || pending.length > 0);
 
+  // Right-click menu actions for the chat input textarea. Mirror the
+  // canvas markdown editor's behavior so the keyboard / clipboard
+  // experience is identical across the app.
+  async function ctxCopy() {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    if (sel) {
+      try {
+        await navigator.clipboard.writeText(sel);
+        showToast({ message: t('common.copied'), tone: 'success' });
+      } catch (err) {
+        console.warn('[chat copy] failed', err);
+      }
+    }
+    setCtxMenu(null);
+  }
+  async function ctxCut() {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const selText = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    if (selText) {
+      try {
+        await navigator.clipboard.writeText(selText);
+      } catch (err) {
+        console.warn('[chat cut] failed', err);
+        setCtxMenu(null);
+        return;
+      }
+      const cursor = ta.selectionStart;
+      setText(ta.value.slice(0, ta.selectionStart) + ta.value.slice(ta.selectionEnd));
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(cursor, cursor);
+      });
+      showToast({ message: t('common.copied'), tone: 'success' });
+    }
+    setCtxMenu(null);
+  }
+  async function ctxPaste() {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    let plain = '';
+    let html = '';
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          if (item.types.includes('text/html') && !html) {
+            html = await (await item.getType('text/html')).text();
+          }
+          if (item.types.includes('text/plain') && !plain) {
+            plain = await (await item.getType('text/plain')).text();
+          }
+        }
+      } else {
+        plain = await navigator.clipboard.readText();
+      }
+    } catch (err) {
+      console.warn('[chat paste] read failed', err);
+      setCtxMenu(null);
+      return;
+    }
+    let insert = plain;
+    if (html.trim()) {
+      const md = await htmlToMarkdown(html);
+      if (md) insert = md;
+    }
+    if (!insert) {
+      setCtxMenu(null);
+      return;
+    }
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const next = ta.value.slice(0, start) + insert + ta.value.slice(end);
+    setText(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const cursor = start + insert.length;
+      ta.setSelectionRange(cursor, cursor);
+    });
+    showToast({ message: t('common.pasted'), tone: 'success' });
+    setCtxMenu(null);
+  }
+  function ctxSelectAll() {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.focus();
+    ta.select();
+    setCtxMenu(null);
+  }
+
   return (
     <div
       className={`message-input${dragOver ? ' drag-over' : ''}`}
@@ -339,6 +439,15 @@ export function MessageInput({
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const ta = e.currentTarget;
+          setCtxMenu({
+            x: e.clientX,
+            y: e.clientY,
+            hasSelection: ta.selectionStart !== ta.selectionEnd,
+          });
+        }}
         placeholder={
           streaming
             ? t('chat.placeholderStreaming')
@@ -413,6 +522,19 @@ export function MessageInput({
         hidden
         onChange={onFilesChange}
       />
+      {ctxMenu ? (
+        <RichTextContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={{
+            cut: ctxMenu.hasSelection ? ctxCut : undefined,
+            copy: ctxMenu.hasSelection ? ctxCopy : undefined,
+            paste: ctxPaste,
+            selectAll: ctxSelectAll,
+          }}
+        />
+      ) : null}
     </div>
   );
 }

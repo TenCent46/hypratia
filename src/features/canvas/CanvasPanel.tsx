@@ -50,6 +50,8 @@ import {
   resolveCrossWindowDragPayload,
 } from './dnd';
 import { ingestDroppedFiles, pasteToCanvas } from './ingest';
+import { RichTextContextMenu } from '../../components/ContextMenu/RichTextContextMenu';
+import { showToast } from '../../components/Toast/Toast';
 import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
 import {
   findFreeNodePosition,
@@ -1197,11 +1199,10 @@ export function CanvasPanel({
     return () => window.removeEventListener('mc:focus-canvas-node', onFocusCanvasNode);
   }, [flow]);
 
-  // Cmd/Ctrl+A while the cursor is over a markdown node → text-select that
-  // node's body only (instead of the browser/React Flow default of selecting
-  // every node, or every text on the page). Skipped when an editable element
-  // (chat input, node editor textarea, etc.) has focus so its native
-  // select-all keeps working.
+  // Cmd/Ctrl+A on a hovered or single-selected markdown node → text-select
+  // that node's body only (instead of the browser default of selecting
+  // every text on the page). Skipped when an editable element has focus
+  // so chat input and node-editor select-all keep working natively.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'a' && e.key !== 'A') return;
@@ -1216,29 +1217,30 @@ export function CanvasPanel({
       ) {
         return;
       }
-      // CSS :hover bubbles up the ancestor chain, so the wrapper itself
-      // matches when the cursor is anywhere inside the node — including
-      // over its rendered Markdown content.
-      const hovered = document.querySelector<HTMLElement>(
-        '.markdown-node:hover',
+      // Resolve target: hover wins (cursor location is the user's
+      // intent), else single-selection fallback.
+      let contentEl: HTMLElement | null = document.querySelector<HTMLElement>(
+        '.markdown-node:hover .markdown-node-content',
       );
-      if (!hovered) return;
-      const content = hovered.querySelector<HTMLElement>(
-        '.markdown-node-content',
-      );
-      if (!content) return;
+      if (!contentEl && selectedNodeIds.length === 1) {
+        contentEl = document.querySelector<HTMLElement>(
+          `.markdown-node-content[data-node-id="${CSS.escape(
+            selectedNodeIds[0],
+          )}"]`,
+        );
+      }
+      if (!contentEl) return;
       e.preventDefault();
       e.stopPropagation();
       const range = document.createRange();
-      range.selectNodeContents(content);
+      range.selectNodeContents(contentEl);
       const sel = window.getSelection();
-      if (!sel) return;
-      sel.removeAllRanges();
-      sel.addRange(range);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
     }
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, []);
+  }, [selectedNodeIds]);
 
   // Cmd/Ctrl+V on the canvas → drop clipboard contents as new node(s). We
   // listen at document level (paste only fires on document.body when no
@@ -1377,6 +1379,41 @@ export function CanvasPanel({
           // firing — without this, even with our menu shown, the
           // layout/show-hide menu can race in on top.
           e.stopPropagation();
+          // If text is currently selected INSIDE the node's rendered
+          // content, the user expects the text-selection menu (Copy /
+          // Ask / Search / Open Markdown). Without this gate, React
+          // Flow's per-node handler beats `onCanvasContextMenu` to it
+          // and silently shows the multi-node selection menu instead.
+          const sel = window.getSelection();
+          const selectedText = sel?.toString().trim() ?? '';
+          const target = e.target as HTMLElement;
+          const contentEl = target.closest<HTMLElement>(
+            '.markdown-node-content',
+          );
+          if (
+            selectedText &&
+            contentEl &&
+            sel &&
+            sel.rangeCount > 0 &&
+            contentEl.contains(sel.anchorNode)
+          ) {
+            const nodeId = contentEl.dataset.nodeId;
+            if (nodeId) {
+              const range = sel.getRangeAt(0);
+              const offsets = getSelectionOffsets(contentEl, range);
+              if (offsets) {
+                setTextSelectionMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  nodeId,
+                  selectedText,
+                  startOffset: offsets.startOffset,
+                  endOffset: offsets.endOffset,
+                });
+                return;
+              }
+            }
+          }
           if (selectedNodeIds.includes(node.id)) {
             selectedMenuAt(e.clientX, e.clientY);
           } else {
@@ -1493,40 +1530,41 @@ export function CanvasPanel({
         />
       ) : null}
       {textSelectionMenu ? (
-        <TextSelectionContextMenu
-          state={textSelectionMenu}
-          onAsk={() => {
-            // Route into the unified AI palette; palette auto-creates
-            // the answer node + edge + selection marker on stream
-            // completion (see parseCanvasSelectionOrigin in AIPalette.tsx).
-            const origin = `canvas-selection:${textSelectionMenu.nodeId}:${textSelectionMenu.startOffset}:${textSelectionMenu.endOffset}`;
-            console.debug('[mc:ask] Ask clicked → openAiPalette', {
-              origin,
-              selectionLength: textSelectionMenu.selectedText.length,
-            });
-            useStore.getState().openAiPalette(
-              textSelectionMenu.selectedText,
-              origin,
-            );
-            setTextSelectionMenu(null);
-          }}
-          onSearch={() => {
-            setSearchOpen({
-              nodeIds: [textSelectionMenu.nodeId],
-              initialQuery: textSelectionMenu.selectedText,
-            });
-            setTextSelectionMenu(null);
-          }}
-          onCopy={() => {
-            void navigator.clipboard.writeText(textSelectionMenu.selectedText);
-            setTextSelectionMenu(null);
-          }}
-          onOpenMarkdown={() => {
-            setCanvasSelection([textSelectionMenu.nodeId], selectEdgesForNodes(storeEdges, [textSelectionMenu.nodeId]));
-            openMarkdownForNode(textSelectionMenu.nodeId);
-            setTextSelectionMenu(null);
-          }}
+        <RichTextContextMenu
+          x={textSelectionMenu.x}
+          y={textSelectionMenu.y}
           onClose={() => setTextSelectionMenu(null)}
+          items={{
+            copy: () => {
+              void navigator.clipboard
+                .writeText(textSelectionMenu.selectedText)
+                .then(() => showToast({ message: t('common.copied'), tone: 'success' }))
+                .catch(() => undefined);
+              setTextSelectionMenu(null);
+            },
+            ask: () => {
+              const origin = `canvas-selection:${textSelectionMenu.nodeId}:${textSelectionMenu.startOffset}:${textSelectionMenu.endOffset}`;
+              useStore
+                .getState()
+                .openAiPalette(textSelectionMenu.selectedText, origin);
+              setTextSelectionMenu(null);
+            },
+            search: () => {
+              setSearchOpen({
+                nodeIds: [textSelectionMenu.nodeId],
+                initialQuery: textSelectionMenu.selectedText,
+              });
+              setTextSelectionMenu(null);
+            },
+            openMarkdown: () => {
+              setCanvasSelection(
+                [textSelectionMenu.nodeId],
+                selectEdgesForNodes(storeEdges, [textSelectionMenu.nodeId]),
+              );
+              openMarkdownForNode(textSelectionMenu.nodeId);
+              setTextSelectionMenu(null);
+            },
+          }}
         />
       ) : null}
       {searchOpen ? (
@@ -1955,54 +1993,8 @@ function SelectionContextMenu({
   );
 }
 
-function TextSelectionContextMenu({
-  state,
-  onAsk,
-  onSearch,
-  onCopy,
-  onOpenMarkdown,
-  onClose,
-}: {
-  state: { x: number; y: number; selectedText: string };
-  onAsk: () => void;
-  onSearch: () => void;
-  onCopy: () => void;
-  onOpenMarkdown: () => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const pos = useClampedMenuPosition(ref, state.x, state.y);
-  useEffect(() => {
-    // pointerdown/capture: the canvas marquee handler preventDefault()'s
-    // pointerdown, which suppresses mousedown on the empty pane.
-    function onDoc(e: globalThis.PointerEvent) {
-      if (!ref.current) return;
-      if (!ref.current.contains(e.target as Node)) onClose();
-    }
-    function onEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('pointerdown', onDoc, true);
-    document.addEventListener('keydown', onEsc);
-    return () => {
-      document.removeEventListener('pointerdown', onDoc, true);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [onClose]);
-  return (
-    <div
-      className="node-context-menu"
-      ref={ref}
-      style={{ left: pos.x, top: pos.y }}
-    >
-      <div className="selection-menu-title">Selected passage</div>
-      <button type="button" onClick={onAsk}>Ask</button>
-      <button type="button" onClick={onSearch}>Search</button>
-      <button type="button" onClick={onCopy}>Copy</button>
-      <button type="button" onClick={onOpenMarkdown}>Open Markdown</button>
-    </div>
-  );
-}
+// TextSelectionContextMenu has been replaced by the shared
+// RichTextContextMenu in src/components/ContextMenu/.
 
 function SearchSelectedModal({
   nodeIds,

@@ -25,6 +25,7 @@ import { SearchPalette } from './features/search/SearchPalette';
 import { CommandPalette } from './components/CommandPalette/CommandPalette';
 import { ShortcutsModal } from './components/CommandPalette/ShortcutsModal';
 import { QuickCapture } from './components/QuickCapture/QuickCapture';
+import { ToastHost } from './components/Toast/Toast';
 import { AIPalette } from './features/ai-palette/AIPalette';
 import { GraphImportModal } from './features/graph-import/GraphImportModal';
 import { WorkspaceConfigModal } from './features/workspace-config/WorkspaceConfigModal';
@@ -1217,6 +1218,7 @@ function ReadyApp() {
       <WorkspaceConfigModal />
       <PdfViewer />
       <Onboarding />
+      <ToastHost />
     </div>
   );
 }

@@ -28,20 +28,19 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 type ProviderProps = {
   children: ReactNode;
-  /** Caller-provided initial locale (set in main.tsx before render to avoid FOUC). */
+  /**
+   * Caller-provided initial locale. Both `src/landing/main.tsx` and
+   * `src/demo/main.tsx` set this before render via `detectLocale()` so the
+   * first paint is already in the user's language. If omitted, we detect
+   * synchronously here so the first render still matches.
+   */
   initialLocale?: Locale;
 };
 
 export function LocaleProvider({ children, initialLocale }: ProviderProps) {
-  const [locale, setLocaleState] = useState<Locale>(initialLocale ?? 'en');
-
-  // If initialLocale wasn't supplied (e.g., tests), detect after mount.
-  useEffect(() => {
-    if (initialLocale) return;
-    const detected = detectLocale();
-    setLocaleState(detected);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [locale, setLocaleState] = useState<Locale>(
+    () => initialLocale ?? detectLocale(),
+  );
 
   useEffect(() => {
     persistLocale(locale);

@@ -173,6 +173,113 @@ const en: Dict = {
   'pasted.image.title': 'Pasted image',
   'new.memo.title': 'New memo',
   'new.memo.body': 'Edit me, or paste content directly onto the canvas.',
+
+  // ---------- v2 landing — Raycast/Obsidian-inspired marketing site ----------
+  'nav.demo': 'Demo',
+  'nav.features': 'Features',
+  'nav.privacy': 'Privacy',
+  'nav.pricing': 'Pricing',
+  'nav.github': 'GitHub',
+  'nav.download': 'Download',
+
+  'v2.hero.eyebrow': 'For Mac · Local-first · BYOK',
+  'v2.hero.headline.l1': 'Stop losing your best',
+  'v2.hero.headline.l2': 'AI conversations.',
+  'v2.hero.sub':
+    'Hypratia turns chats, documents, PDFs, and ideas into a local-first thinking canvas.',
+  'v2.hero.cta.download': 'Download for macOS',
+  'v2.hero.cta.github': 'View on GitHub',
+  'v2.hero.meta': 'Free during beta · Apple Silicon & Intel · macOS 12+',
+
+  'v2.demo.eyebrow': 'A canvas that grows with the conversation',
+  'v2.demo.title': 'Where every chat finds its place.',
+  'v2.demo.sub':
+    'A simulated walkthrough of what Hypratia feels like in motion. The Mac app does the same — locally.',
+
+  'v2.features.eyebrow': 'Why Hypratia',
+  'v2.features.title': 'Designed to keep your thinking, not capture it.',
+  'v2.features.spatial.title': 'Spatial memory for AI conversations',
+  'v2.features.spatial.desc':
+    'Your best AI conversations should not disappear into infinite scroll.',
+  'v2.features.local.title': 'Local-first project knowledge',
+  'v2.features.local.desc':
+    'Keep PDFs, Markdown, notes, and memories on your Mac.',
+  'v2.features.byok.title': 'BYOK and provider freedom',
+  'v2.features.byok.desc':
+    'Use OpenAI, Anthropic, Google, Mistral, or your own compatible provider.',
+  'v2.features.export.title': 'Export to your vault',
+  'v2.features.export.desc':
+    'Turn conversations and nodes into Markdown for Obsidian-style workflows.',
+
+  'v2.privacy.eyebrow': 'Privacy by architecture',
+  'v2.privacy.title':
+    'Your thinking should not live inside someone else’s cloud.',
+  'v2.privacy.body':
+    'Hypratia stores your conversations, nodes, project files, and memory locally. There is no telemetry. Network requests are limited to the AI providers you configure and optional update checks.',
+  'v2.privacy.point.local': 'Local-only data by default',
+  'v2.privacy.point.byok': 'Bring your own keys',
+  'v2.privacy.point.notelemetry': 'Zero telemetry',
+  'v2.privacy.point.markdown': 'Plain Markdown on disk',
+
+  'v2.pricing.eyebrow': 'Pricing',
+  'v2.pricing.title': 'Three ways in.',
+  'v2.pricing.community.title': 'Community',
+  'v2.pricing.community.tagline': 'Free and open-source core.',
+  'v2.pricing.community.cta': 'Coming soon',
+  'v2.pricing.community.bullet1': 'Local-first canvas + chat',
+  'v2.pricing.community.bullet2': 'BYOK for any major provider',
+  'v2.pricing.community.bullet3': 'Markdown export to your vault',
+  'v2.pricing.founder.title': 'Founder',
+  'v2.pricing.founder.tagline':
+    'One-time early supporter license for Hypratia 1.x Pro features.',
+  'v2.pricing.founder.cta': 'Join waitlist',
+  'v2.pricing.founder.bullet1': 'Lifetime Pro on 1.x',
+  'v2.pricing.founder.bullet2': 'Founder badge & input on roadmap',
+  'v2.pricing.founder.bullet3': 'Priority support',
+  'v2.pricing.pro.title': 'Pro',
+  'v2.pricing.pro.tagline':
+    'Advanced local AI workflows, official builds, and early access features.',
+  'v2.pricing.pro.cta': 'Join waitlist',
+  'v2.pricing.pro.bullet1': 'Local embeddings & semantic search',
+  'v2.pricing.pro.bullet2': 'Advanced citation & PDF tooling',
+  'v2.pricing.pro.bullet3': 'Early access to new pipelines',
+  'v2.pricing.popular': 'Most popular',
+
+  'v2.finalcta.title': 'Build a place for your thoughts to return to.',
+  'v2.finalcta.sub':
+    'A quiet desktop app that keeps the thread you’re actually thinking in.',
+  'v2.finalcta.download': 'Download for macOS',
+  'v2.finalcta.github': 'Star on GitHub',
+
+  'v2.footer.tagline': 'Local-first memory canvas for LLM conversations',
+  'v2.footer.section.product': 'Product',
+  'v2.footer.section.resources': 'Resources',
+  'v2.footer.section.legal': 'Legal',
+  'v2.footer.link.demo': 'Live demo',
+  'v2.footer.link.changelog': 'Changelog',
+  'v2.footer.link.docs': 'Docs',
+  'v2.footer.link.privacy': 'Privacy',
+  'v2.footer.link.license': 'MIT License',
+
+  // Mock chat / canvas content used by the animated InteractiveAppDemo.
+  'v2.mock.chat.title': 'Project · Hypratia design',
+  'v2.mock.chat.user1': 'How should the canvas remember context?',
+  'v2.mock.chat.assistant1':
+    'Treat each pinned answer as a node. Position is the index — relations are edges.',
+  'v2.mock.chat.user2': 'Pin that answer.',
+  'v2.mock.chat.assistant2':
+    'Pinned. It now lives on the canvas — drag it anywhere, link it to a PDF, export to your vault.',
+  'v2.mock.toast.export': 'Exported to Obsidian vault',
+  'v2.mock.node.pinned.title': 'Spatial memory',
+  'v2.mock.node.pinned.body':
+    'Pinned answers become nodes. Position = index, relations = edges.',
+  'v2.mock.node.idea.title': 'Idea cluster',
+  'v2.mock.node.idea.body': 'Group related threads in space.',
+  'v2.mock.node.pdf.title': 'research-paper.pdf',
+  'v2.mock.node.pdf.preview':
+    'Place-cell hypothesis · spatial memory in human cognition…',
+  'v2.mock.node.md.title': 'reading-list.md',
+  'v2.mock.node.md.preview': 'Books on memory and cognition · 12 items',
 };
 
 const ja: Dict = {
@@ -314,6 +421,111 @@ const ja: Dict = {
   'pasted.image.title': '貼り付けた画像',
   'new.memo.title': '新しいメモ',
   'new.memo.body': '編集してください。あるいはキャンバスに直接貼り付けてください。',
+
+  // ---------- v2 landing ----------
+  'nav.demo': 'デモ',
+  'nav.features': '特長',
+  'nav.privacy': 'プライバシー',
+  'nav.pricing': '料金',
+  'nav.github': 'GitHub',
+  'nav.download': 'ダウンロード',
+
+  'v2.hero.eyebrow': 'Mac 用 · ローカルファースト · BYOK',
+  'v2.hero.headline.l1': 'いちばん大事な AI 会話を、',
+  'v2.hero.headline.l2': '失わない場所へ。',
+  'v2.hero.sub':
+    'Hypratia は会話、ドキュメント、PDF、アイデアを、ローカルファーストの思考キャンバスに変えます。',
+  'v2.hero.cta.download': 'macOS 版をダウンロード',
+  'v2.hero.cta.github': 'GitHub で見る',
+  'v2.hero.meta': 'ベータ期間中は無料 · Apple Silicon と Intel · macOS 12 以降',
+
+  'v2.demo.eyebrow': '会話とともに育つキャンバス',
+  'v2.demo.title': 'すべてのチャットに、居場所を。',
+  'v2.demo.sub':
+    'Hypratia の動きを擬似再現したシミュレーション。Mac アプリでは同じことが、ローカルで起きます。',
+
+  'v2.features.eyebrow': 'なぜ Hypratia なのか',
+  'v2.features.title': '思考を残すための設計。記録のためではなく。',
+  'v2.features.spatial.title': 'AI 会話のための空間記憶',
+  'v2.features.spatial.desc':
+    'いちばん良かった AI との会話を、無限スクロールに飲み込ませない。',
+  'v2.features.local.title': 'ローカルファーストのプロジェクト知識',
+  'v2.features.local.desc':
+    'PDF、Markdown、ノート、メモリーをすべて Mac の中に。',
+  'v2.features.byok.title': 'BYOK / プロバイダー自由',
+  'v2.features.byok.desc':
+    'OpenAI、Anthropic、Google、Mistral、互換プロバイダーまで自由に。',
+  'v2.features.export.title': 'Vault へエクスポート',
+  'v2.features.export.desc':
+    '会話とノードを Markdown として書き出し、Obsidian 流のワークフローへ。',
+
+  'v2.privacy.eyebrow': '設計レベルでのプライバシー',
+  'v2.privacy.title': 'あなたの思考を、誰かのクラウドに置かないために。',
+  'v2.privacy.body':
+    'Hypratia は会話・ノード・プロジェクトファイル・メモリーをすべてローカルに保存します。テレメトリはありません。ネットワーク通信は、設定した AI プロバイダーへの API 通信と任意のアップデート確認に限定されます。',
+  'v2.privacy.point.local': '初期値はローカル限定',
+  'v2.privacy.point.byok': 'API キーは持参',
+  'v2.privacy.point.notelemetry': 'テレメトリゼロ',
+  'v2.privacy.point.markdown': 'ディスク上はプレーン Markdown',
+
+  'v2.pricing.eyebrow': '料金',
+  'v2.pricing.title': '入り口は 3 つ。',
+  'v2.pricing.community.title': 'Community',
+  'v2.pricing.community.tagline': '無料 + オープンソースのコア。',
+  'v2.pricing.community.cta': '近日公開',
+  'v2.pricing.community.bullet1': 'ローカルファーストのキャンバス + チャット',
+  'v2.pricing.community.bullet2': '主要プロバイダーすべての BYOK',
+  'v2.pricing.community.bullet3': 'Vault への Markdown エクスポート',
+  'v2.pricing.founder.title': 'Founder',
+  'v2.pricing.founder.tagline':
+    'Hypratia 1.x Pro 機能のための、買い切り早期支援者ライセンス。',
+  'v2.pricing.founder.cta': 'ウェイトリストに登録',
+  'v2.pricing.founder.bullet1': '1.x の Pro を生涯利用',
+  'v2.pricing.founder.bullet2': 'Founder バッジ + ロードマップへの意見',
+  'v2.pricing.founder.bullet3': '優先サポート',
+  'v2.pricing.pro.title': 'Pro',
+  'v2.pricing.pro.tagline':
+    '高度なローカル AI ワークフロー、公式ビルド、早期アクセス機能。',
+  'v2.pricing.pro.cta': 'ウェイトリストに登録',
+  'v2.pricing.pro.bullet1': 'ローカル埋め込み + 意味検索',
+  'v2.pricing.pro.bullet2': '高度な引用 / PDF ツーリング',
+  'v2.pricing.pro.bullet3': '新パイプラインへの早期アクセス',
+  'v2.pricing.popular': '人気',
+
+  'v2.finalcta.title': '思考が帰ってこられる場所をつくる。',
+  'v2.finalcta.sub':
+    '本当に考えていた糸を、ちゃんと残してくれる静かなデスクトップアプリ。',
+  'v2.finalcta.download': 'macOS 版をダウンロード',
+  'v2.finalcta.github': 'GitHub でスター',
+
+  'v2.footer.tagline': 'LLM 会話のためのローカルファースト・メモリーキャンバス',
+  'v2.footer.section.product': 'プロダクト',
+  'v2.footer.section.resources': 'リソース',
+  'v2.footer.section.legal': '規約',
+  'v2.footer.link.demo': 'ライブデモ',
+  'v2.footer.link.changelog': 'Changelog',
+  'v2.footer.link.docs': 'ドキュメント',
+  'v2.footer.link.privacy': 'プライバシー',
+  'v2.footer.link.license': 'MIT ライセンス',
+
+  'v2.mock.chat.title': 'プロジェクト · Hypratia 設計',
+  'v2.mock.chat.user1': 'キャンバスはどうやって文脈を覚えるべき？',
+  'v2.mock.chat.assistant1':
+    '固定された回答をノード扱いに。位置がインデックス、関係がエッジ。',
+  'v2.mock.chat.user2': 'この回答を固定しておいて。',
+  'v2.mock.chat.assistant2':
+    '固定しました。キャンバスにノードとして残ります — ドラッグ、PDF とリンク、Vault へエクスポートが可能。',
+  'v2.mock.toast.export': 'Obsidian Vault に書き出しました',
+  'v2.mock.node.pinned.title': '空間記憶',
+  'v2.mock.node.pinned.body':
+    '固定された回答はノードに。位置 = インデックス、関係 = エッジ。',
+  'v2.mock.node.idea.title': 'アイデア群',
+  'v2.mock.node.idea.body': '関連スレッドを空間でグルーピング。',
+  'v2.mock.node.pdf.title': 'research-paper.pdf',
+  'v2.mock.node.pdf.preview':
+    '場所細胞仮説 · 人間の認知における空間記憶…',
+  'v2.mock.node.md.title': 'reading-list.md',
+  'v2.mock.node.md.preview': '記憶と認知の書籍 · 12 件',
 };
 
 const zh: Dict = {
@@ -455,6 +667,110 @@ const zh: Dict = {
   'pasted.image.title': '粘贴的图片',
   'new.memo.title': '新建备忘',
   'new.memo.body': '编辑此处，或直接将内容粘贴到画布上。',
+
+  // ---------- v2 landing ----------
+  'nav.demo': '演示',
+  'nav.features': '特性',
+  'nav.privacy': '隐私',
+  'nav.pricing': '价格',
+  'nav.github': 'GitHub',
+  'nav.download': '下载',
+
+  'v2.hero.eyebrow': 'macOS 专属 · 本地优先 · BYOK',
+  'v2.hero.headline.l1': '别让最好的 AI 对话',
+  'v2.hero.headline.l2': '从你身边消失。',
+  'v2.hero.sub':
+    'Hypratia 把对话、文档、PDF 与想法变成本地优先的思考画布。',
+  'v2.hero.cta.download': '下载 macOS 版',
+  'v2.hero.cta.github': '在 GitHub 查看',
+  'v2.hero.meta': '测试期间免费 · Apple Silicon 与 Intel · macOS 12 及以上',
+
+  'v2.demo.eyebrow': '随对话生长的画布',
+  'v2.demo.title': '让每一段对话，都有一个落点。',
+  'v2.demo.sub':
+    '这是 Hypratia 运行起来的模拟演示。Mac 应用本地完成同样的事。',
+
+  'v2.features.eyebrow': '为什么选 Hypratia',
+  'v2.features.title': '设计目的：留住思考，而不是抓取它。',
+  'v2.features.spatial.title': 'AI 对话的空间化记忆',
+  'v2.features.spatial.desc':
+    '最好的 AI 对话，不该消失在无限滚动里。',
+  'v2.features.local.title': '本地优先的项目知识',
+  'v2.features.local.desc':
+    'PDF、Markdown、笔记、记忆——全部留在你的 Mac 上。',
+  'v2.features.byok.title': 'BYOK 与服务商自由',
+  'v2.features.byok.desc':
+    'OpenAI、Anthropic、Google、Mistral 或你自己的兼容服务商，随你选。',
+  'v2.features.export.title': '导出到你的库',
+  'v2.features.export.desc':
+    '把对话与节点导出为 Markdown，融入 Obsidian 风格的工作流。',
+
+  'v2.privacy.eyebrow': '架构层面的隐私',
+  'v2.privacy.title': '你的思考不该住在别人的云里。',
+  'v2.privacy.body':
+    'Hypratia 把对话、节点、项目文件和记忆都存在本地。无遥测。仅与你配置的 AI 服务商和可选的更新检查通信。',
+  'v2.privacy.point.local': '默认本地存储',
+  'v2.privacy.point.byok': '自带 API 密钥',
+  'v2.privacy.point.notelemetry': '零遥测',
+  'v2.privacy.point.markdown': '磁盘上是纯 Markdown',
+
+  'v2.pricing.eyebrow': '价格',
+  'v2.pricing.title': '三条入口。',
+  'v2.pricing.community.title': 'Community',
+  'v2.pricing.community.tagline': '免费、开源的核心。',
+  'v2.pricing.community.cta': '即将推出',
+  'v2.pricing.community.bullet1': '本地优先的画布 + 聊天',
+  'v2.pricing.community.bullet2': '主流服务商 BYOK',
+  'v2.pricing.community.bullet3': '导出到你的 Markdown 库',
+  'v2.pricing.founder.title': 'Founder',
+  'v2.pricing.founder.tagline':
+    '一次性早期支持者授权，含 Hypratia 1.x Pro 功能。',
+  'v2.pricing.founder.cta': '加入候补名单',
+  'v2.pricing.founder.bullet1': '1.x 全程 Pro',
+  'v2.pricing.founder.bullet2': 'Founder 徽章 + 路线图发言权',
+  'v2.pricing.founder.bullet3': '优先支持',
+  'v2.pricing.pro.title': 'Pro',
+  'v2.pricing.pro.tagline':
+    '高级本地 AI 工作流、官方构建、抢先体验功能。',
+  'v2.pricing.pro.cta': '加入候补名单',
+  'v2.pricing.pro.bullet1': '本地嵌入与语义检索',
+  'v2.pricing.pro.bullet2': '高级引用与 PDF 工具',
+  'v2.pricing.pro.bullet3': '新管线抢先体验',
+  'v2.pricing.popular': '热门',
+
+  'v2.finalcta.title': '为思考造一个能回去的地方。',
+  'v2.finalcta.sub':
+    '一个安静的桌面应用，留住你真正在思考的那条线索。',
+  'v2.finalcta.download': '下载 macOS 版',
+  'v2.finalcta.github': '在 GitHub 上 Star',
+
+  'v2.footer.tagline': '面向 LLM 对话的本地优先记忆画布',
+  'v2.footer.section.product': '产品',
+  'v2.footer.section.resources': '资源',
+  'v2.footer.section.legal': '法律',
+  'v2.footer.link.demo': '在线演示',
+  'v2.footer.link.changelog': '更新记录',
+  'v2.footer.link.docs': '文档',
+  'v2.footer.link.privacy': '隐私',
+  'v2.footer.link.license': 'MIT 许可证',
+
+  'v2.mock.chat.title': '项目 · Hypratia 设计',
+  'v2.mock.chat.user1': '画布该怎么记住上下文？',
+  'v2.mock.chat.assistant1':
+    '把每一条置顶回答当作节点。位置就是索引，关系就是边。',
+  'v2.mock.chat.user2': '把这条置顶。',
+  'v2.mock.chat.assistant2':
+    '已置顶。它现在停在画布上 — 拖到任意位置、链接到 PDF、导出到你的库。',
+  'v2.mock.toast.export': '已导出到 Obsidian 库',
+  'v2.mock.node.pinned.title': '空间化记忆',
+  'v2.mock.node.pinned.body':
+    '置顶回答变成节点。位置 = 索引，关系 = 边。',
+  'v2.mock.node.idea.title': '想法簇',
+  'v2.mock.node.idea.body': '在空间中聚集相关线程。',
+  'v2.mock.node.pdf.title': 'research-paper.pdf',
+  'v2.mock.node.pdf.preview': '位置细胞假说 · 人类认知中的空间记忆…',
+  'v2.mock.node.md.title': 'reading-list.md',
+  'v2.mock.node.md.preview': '关于记忆与认知的书 · 12 项',
 };
 
 const dicts: Record<Locale, Dict> = { en, ja, zh };

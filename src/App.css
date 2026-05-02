@@ -6745,3 +6745,35 @@ input::placeholder {
     transform: rotate(360deg);
   }
 }
+
+/* Lightweight toast host. Bottom-center stack, fade in / out, sized for
+   short messages like "Copied" / "Pasted". Drives the Toast component
+   in src/components/Toast. */
+.toast-host {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 9000;
+  pointer-events: none;
+}
+.toast {
+  background: var(--text);
+  color: var(--bg);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  animation: mc-toast-in 0.18s ease-out;
+}
+.toast-success { background: #2a7d4f; color: #fff; }
+.toast-error { background: #b3261e; color: #fff; }
+@keyframes mc-toast-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
