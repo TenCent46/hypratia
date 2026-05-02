@@ -22,14 +22,19 @@ import {
   CANVAS_FONT_SIZE_DEFAULT,
   CANVAS_FONT_SIZE_MAX,
   CANVAS_FONT_SIZE_MIN,
+  NIGHT_MODE_DEFAULT_END,
+  NIGHT_MODE_DEFAULT_START,
+  NIGHT_MODE_DEFAULT_THEME,
 } from '../../types';
 
 type Tab = 'providers' | 'usage' | 'appearance' | 'vault' | 'workflow' | 'about';
 
 const THEMES: { id: Theme; label: string }[] = [
   { id: 'light', label: 'Light' },
-  { id: 'dark', label: 'Dark' },
+  { id: 'white', label: 'White' },
+  { id: 'violet', label: 'Violet' },
   { id: 'sepia', label: 'Sepia' },
+  { id: 'dark', label: 'Dark' },
   { id: 'high-contrast', label: 'High contrast' },
 ];
 
@@ -872,7 +877,81 @@ function AppearanceTab() {
       <p className="muted" style={{ marginTop: 12 }}>
         Theme applies instantly. Custom accent and brand themes are coming in v1.0.1.
       </p>
+
+      <NightModeSection />
     </section>
+  );
+}
+
+function NightModeSection() {
+  const auto = useStore((s) => s.settings.nightModeAuto ?? false);
+  const nightTheme = useStore(
+    (s) => s.settings.nightModeTheme ?? NIGHT_MODE_DEFAULT_THEME,
+  );
+  const start = useStore(
+    (s) => s.settings.nightModeStart ?? NIGHT_MODE_DEFAULT_START,
+  );
+  const end = useStore(
+    (s) => s.settings.nightModeEnd ?? NIGHT_MODE_DEFAULT_END,
+  );
+  const setNightModeAuto = useStore((s) => s.setNightModeAuto);
+  const setNightModeTheme = useStore((s) => s.setNightModeTheme);
+  const setNightModeWindow = useStore((s) => s.setNightModeWindow);
+  return (
+    <>
+      <h3 style={{ marginTop: 24 }}>Auto night theme</h3>
+      <label>
+        <input
+          type="checkbox"
+          checked={auto}
+          onChange={(e) => setNightModeAuto(e.target.checked)}
+        />{' '}
+        Switch to a dark theme at night
+      </label>
+      <p className="muted small">
+        Your selected theme above stays as the day theme; only the displayed
+        appearance is overridden during the night window.
+      </p>
+      {auto ? (
+        <>
+          <div className="settings-row">
+            <label htmlFor="night-theme-select">Night theme</label>
+            <select
+              id="night-theme-select"
+              value={nightTheme}
+              onChange={(e) =>
+                setNightModeTheme(e.target.value as Theme)
+              }
+            >
+              <option value="dark">Dark</option>
+              <option value="high-contrast">High contrast</option>
+            </select>
+          </div>
+          <div className="settings-row">
+            <label htmlFor="night-start">Starts at</label>
+            <input
+              id="night-start"
+              type="time"
+              value={start}
+              onChange={(e) =>
+                setNightModeWindow({ start: e.target.value })
+              }
+            />
+          </div>
+          <div className="settings-row">
+            <label htmlFor="night-end">Ends at</label>
+            <input
+              id="night-end"
+              type="time"
+              value={end}
+              onChange={(e) =>
+                setNightModeWindow({ end: e.target.value })
+              }
+            />
+          </div>
+        </>
+      ) : null}
+    </>
   );
 }
 

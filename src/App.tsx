@@ -32,7 +32,13 @@ import { PdfViewer } from './features/pdf/PdfViewer';
 import { Onboarding } from './components/Onboarding/Onboarding';
 import { hydrateAndWire } from './store/persistence';
 import { useStore } from './store';
-import { CANVAS_FONT_SIZE_DEFAULT } from './types';
+import {
+  CANVAS_FONT_SIZE_DEFAULT,
+  NIGHT_MODE_DEFAULT_END,
+  NIGHT_MODE_DEFAULT_START,
+  NIGHT_MODE_DEFAULT_THEME,
+  isInNightWindow,
+} from './types';
 import { useKeymap } from './services/commands/useKeymap';
 import { useMenu, type LayoutControls } from './services/commands/useMenu';
 import { setMenuCheck } from './services/menu';
@@ -115,6 +121,16 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const theme = useStore((s) => s.settings.theme);
   const canvasFontSize = useStore((s) => s.settings.canvasFontSize);
+  const nightModeAuto = useStore((s) => s.settings.nightModeAuto ?? false);
+  const nightModeTheme = useStore(
+    (s) => s.settings.nightModeTheme ?? NIGHT_MODE_DEFAULT_THEME,
+  );
+  const nightModeStart = useStore(
+    (s) => s.settings.nightModeStart ?? NIGHT_MODE_DEFAULT_START,
+  );
+  const nightModeEnd = useStore(
+    (s) => s.settings.nightModeEnd ?? NIGHT_MODE_DEFAULT_END,
+  );
 
   useEffect(() => {
     console.info('[mc:loading] App splash — hydrateAndWire start');
@@ -151,8 +167,23 @@ function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme ?? 'light');
-  }, [theme]);
+    function effective(): string {
+      const dayTheme = theme ?? 'light';
+      if (!nightModeAuto) return dayTheme;
+      return isInNightWindow(new Date(), nightModeStart, nightModeEnd)
+        ? nightModeTheme
+        : dayTheme;
+    }
+    function apply() {
+      document.documentElement.setAttribute('data-theme', effective());
+    }
+    apply();
+    if (!nightModeAuto) return;
+    // Re-evaluate every minute so the theme flips when the clock crosses
+    // the start/end boundary while the app stays open.
+    const id = setInterval(apply, 60_000);
+    return () => clearInterval(id);
+  }, [theme, nightModeAuto, nightModeTheme, nightModeStart, nightModeEnd]);
 
   useEffect(() => {
     const px = canvasFontSize ?? CANVAS_FONT_SIZE_DEFAULT;

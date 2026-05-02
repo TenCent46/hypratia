@@ -45,7 +45,12 @@ export function DemoChat() {
     <aside className="chat-panel demo-chat">
       <header className="demo-chat-header">
         <span className="demo-chat-title">Today’s thread</span>
-        <span className="demo-chat-meta">2 messages · 1 idea pinned</span>
+        <span
+          className="demo-mode-badge"
+          title="Static demo — no API keys, no provider calls"
+        >
+          Demo · no AI calls
+        </span>
       </header>
       <div className="message-list">
         {SAMPLE_MESSAGES.map((m) => (
@@ -61,7 +66,9 @@ export function DemoChat() {
         ))}
       </div>
       <footer className="demo-chat-composer" aria-hidden>
-        <div className="demo-chat-composer-input">Ask something…</div>
+        <div className="demo-chat-composer-input">
+          Composer disabled — install the Mac app to chat
+        </div>
         <button type="button" className="demo-chat-composer-send" tabIndex={-1}>
           ↩
         </button>

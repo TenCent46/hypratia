@@ -12,16 +12,25 @@
  */
 
 :root {
+  /* Brand palette — sourced from the Hypratia app icon (Freeform-style:
+     warm orange circle, translucent blue rectangle, navy memory line). */
+  --brand-navy: #14254a;
+  --brand-navy-deep: #0a1832;
+  --brand-blue: #5ac8fa;
+  --brand-blue-soft: rgba(90, 200, 250, 0.18);
+  --brand-orange: #ffb547;
+  --brand-orange-soft: rgba(255, 181, 71, 0.22);
+
   --demo-page-bg: #ffffff;
-  --demo-page-bg-soft: #f6f6f7;
-  --demo-page-line: #e6e6ea;
-  --demo-page-text: #14141a;
-  --demo-page-text-mute: #6b6b75;
-  --demo-cta-bg: #14141a;
-  --demo-cta-bg-hover: #2a2a32;
+  --demo-page-bg-soft: #f7f8fb;
+  --demo-page-line: #e3e6ee;
+  --demo-page-text: var(--brand-navy);
+  --demo-page-text-mute: #6c7591;
+  --demo-cta-bg: var(--brand-navy);
+  --demo-cta-bg-hover: var(--brand-navy-deep);
   --demo-cta-fg: #ffffff;
-  --demo-stage-shadow: 0 30px 80px -32px rgba(20, 20, 26, 0.18),
-    0 6px 24px -12px rgba(20, 20, 26, 0.08);
+  --demo-stage-shadow: 0 30px 80px -32px rgba(20, 37, 74, 0.20),
+    0 6px 24px -12px rgba(20, 37, 74, 0.10);
 }
 
 html,
@@ -32,6 +41,18 @@ body {
 body {
   color: var(--demo-page-text);
   -webkit-font-smoothing: antialiased;
+}
+
+/* App-icon mark — used in the header (small) and hero (large). */
+.hyp-icon {
+  display: block;
+  border-radius: 22.5%;
+  flex-shrink: 0;
+}
+.hyp-icon--shadow {
+  filter:
+    drop-shadow(0 24px 36px rgba(20, 37, 74, 0.18))
+    drop-shadow(0 8px 14px rgba(20, 37, 74, 0.10));
 }
 
 .demo-shell {
@@ -61,17 +82,6 @@ body {
   gap: 10px;
   text-decoration: none;
   color: var(--demo-page-text);
-}
-.demo-brand-mark {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--demo-page-text);
-  color: #fff;
-  font-size: 14px;
-  letter-spacing: 0;
 }
 .demo-brand-name {
   font-family: var(--font-serif, ui-serif, Georgia, serif);
@@ -128,10 +138,16 @@ body {
 /* ---------- Hero ---------- */
 
 .demo-hero {
-  padding: clamp(40px, 8vw, 96px) clamp(20px, 6vw, 64px) clamp(24px, 4vw, 48px);
+  padding: clamp(36px, 7vw, 80px) clamp(20px, 6vw, 64px) clamp(24px, 4vw, 48px);
   max-width: 940px;
   margin: 0 auto;
   text-align: center;
+  position: relative;
+}
+.demo-hero-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: clamp(20px, 3vw, 32px);
 }
 .demo-hero-eyebrow {
   margin: 0 0 16px;
@@ -293,8 +309,9 @@ body {
 }
 .demo-chat-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border, var(--demo-page-line));
   background: var(--bg-soft, #f6f0df);
@@ -347,6 +364,267 @@ body {
   color: var(--text, var(--demo-page-text));
 }
 
+/* "Demo mode — no AI calls" badge — surfaced wherever someone might mistake
+   the demo for a real provider integration. */
+.demo-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--brand-blue-soft);
+  color: var(--brand-navy);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid rgba(90, 200, 250, 0.4);
+}
+.demo-mode-badge--inline {
+  margin-left: 12px;
+  vertical-align: middle;
+  font-size: 11px;
+  transform: translateY(-3px);
+}
+
+/* "+ Add memo" floating button — anchored top-left of the canvas. */
+.demo-add-memo-btn {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px 7px 9px;
+  border-radius: 999px;
+  background: var(--brand-navy);
+  color: #fff;
+  border: 1px solid var(--brand-navy);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.10) inset,
+    0 8px 18px -8px rgba(20, 37, 74, 0.40);
+  transition: transform 120ms ease, background 120ms ease;
+  z-index: 4;
+}
+.demo-add-memo-btn:hover {
+  background: var(--brand-navy-deep);
+  transform: translateY(-1px);
+}
+.demo-add-memo-btn:active {
+  transform: translateY(0);
+}
+.demo-add-memo-plus {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* ---------- File-type node ---------- */
+
+.demo-file-node .demo-file-header {
+  align-items: center;
+  margin-bottom: 6px;
+}
+.demo-file-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+.demo-file-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.demo-file-preview {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text, var(--demo-page-text));
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+.demo-file-meta {
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-mute, var(--demo-page-text-mute));
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.demo-file-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-mute, var(--demo-page-text-mute));
+  font-style: italic;
+}
+
+/* ---------- Welcome tour overlay ---------- */
+
+.demo-tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+}
+.demo-tour-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 37, 74, 0.42);
+  backdrop-filter: blur(2px);
+  border: none;
+  cursor: pointer;
+  pointer-events: auto;
+  animation: demo-tour-fade 200ms ease-out;
+}
+.demo-tour-glow {
+  position: fixed;
+  border-radius: 14px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 4px rgba(90, 200, 250, 0.55),
+    0 0 0 9px rgba(90, 200, 250, 0.18),
+    0 0 36px 6px rgba(90, 200, 250, 0.40);
+  animation: demo-tour-pulse 1.6s ease-in-out infinite;
+}
+@keyframes demo-tour-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 4px rgba(90, 200, 250, 0.55),
+      0 0 0 9px rgba(90, 200, 250, 0.18),
+      0 0 36px 6px rgba(90, 200, 250, 0.40);
+  }
+  50% {
+    box-shadow:
+      0 0 0 5px rgba(90, 200, 250, 0.65),
+      0 0 0 12px rgba(90, 200, 250, 0.22),
+      0 0 48px 10px rgba(90, 200, 250, 0.55);
+  }
+}
+@keyframes demo-tour-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes demo-tour-card-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.demo-tour-card {
+  position: fixed;
+  bottom: clamp(20px, 4vh, 56px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 32px));
+  background: var(--demo-page-bg);
+  border-radius: 16px;
+  padding: 22px 22px 18px;
+  box-shadow:
+    0 24px 60px -16px rgba(20, 37, 74, 0.45),
+    0 6px 20px -8px rgba(20, 37, 74, 0.20);
+  border: 1px solid var(--demo-page-line);
+  pointer-events: auto;
+  animation: demo-tour-card-in 260ms cubic-bezier(0.2, 0.8, 0.25, 1);
+}
+.demo-tour-progress {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.demo-tour-dot {
+  width: 24px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--demo-page-line);
+  transition: background 200ms ease;
+}
+.demo-tour-dot.done {
+  background: var(--brand-blue);
+}
+.demo-tour-dot.active {
+  background: var(--brand-navy);
+}
+.demo-tour-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--demo-page-text-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  margin-bottom: 4px;
+}
+.demo-tour-title {
+  margin: 0 0 8px;
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--demo-page-text);
+  letter-spacing: -0.01em;
+}
+.demo-tour-body {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--demo-page-text-mute);
+}
+.demo-tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.demo-tour-skip {
+  background: none;
+  border: none;
+  color: var(--demo-page-text-mute);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px 4px;
+}
+.demo-tour-skip:hover {
+  color: var(--demo-page-text);
+}
+.demo-tour-next {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--brand-navy);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+  box-shadow: 0 6px 14px -6px rgba(20, 37, 74, 0.45);
+}
+.demo-tour-next:hover {
+  background: var(--brand-navy-deep);
+  transform: translateY(-1px);
+}
+
 /* ---------- Features ---------- */
 
 .demo-features {
@@ -368,6 +646,25 @@ body {
   border: 1px solid var(--demo-page-line);
   border-radius: 14px;
   background: var(--demo-page-bg-soft);
+  position: relative;
+  overflow: hidden;
+}
+.demo-feature::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--demo-feature-accent, var(--brand-navy));
+  opacity: 0.85;
+}
+.demo-feature:nth-child(1) {
+  --demo-feature-accent: var(--brand-navy);
+}
+.demo-feature:nth-child(2) {
+  --demo-feature-accent: var(--brand-orange);
+}
+.demo-feature:nth-child(3) {
+  --demo-feature-accent: var(--brand-blue);
 }
 .demo-feature-title {
   margin: 0 0 8px;
@@ -440,11 +737,23 @@ body {
   width: 26px;
   height: 26px;
   border-radius: 999px;
-  background: var(--demo-page-text);
+  background: var(--demo-step-accent, var(--brand-navy));
   color: #fff;
   font-size: 12px;
   font-weight: 700;
   margin-bottom: 10px;
+}
+.demo-step:nth-child(1) {
+  --demo-step-accent: var(--brand-navy);
+}
+.demo-step:nth-child(2) {
+  --demo-step-accent: var(--brand-blue);
+}
+.demo-step:nth-child(3) {
+  --demo-step-accent: var(--brand-orange);
+}
+.demo-step:nth-child(4) {
+  --demo-step-accent: var(--brand-navy);
 }
 .demo-step-title {
   margin: 0 0 6px;

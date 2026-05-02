@@ -1,8 +1,9 @@
 import type { Edge } from '@xyflow/react';
 import type { DemoMemoNodeType } from './DemoMemoNode';
 import type { DemoImageNodeType } from './DemoImageNode';
+import type { DemoFileNodeType } from './DemoFileNode';
 
-export type DemoNode = DemoMemoNodeType | DemoImageNodeType;
+export type DemoNode = DemoMemoNodeType | DemoImageNodeType | DemoFileNodeType;
 
 export const initialNodes: DemoNode[] = [
   {
@@ -65,6 +66,45 @@ export const initialNodes: DemoNode[] = [
       body: 'Export to your vault as Markdown with wikilinks. Round-trip safe. Your notes outlive the app.',
     },
   },
+  // ---------- File nodes — demonstrate that PDF / PPTX / MD all become spatial ----------
+  {
+    id: 'pdf-research',
+    type: 'file',
+    position: { x: 880, y: 20 },
+    style: { width: 260, height: 160 },
+    data: {
+      type: 'pdf',
+      filename: 'research-paper.pdf',
+      preview:
+        'Spatial memory in human cognition: a review of recent neuroimaging evidence supporting the place-cell hypothesis…',
+      meta: '24 pages · 3 citations linked',
+    },
+  },
+  {
+    id: 'pptx-deck',
+    type: 'file',
+    position: { x: 880, y: 220 },
+    style: { width: 260, height: 160 },
+    data: {
+      type: 'pptx',
+      filename: 'q1-roadmap.pptx',
+      preview: 'Q1 roadmap · objectives · milestones · risks',
+      meta: '12 slides',
+    },
+  },
+  {
+    id: 'md-reading-list',
+    type: 'file',
+    position: { x: 880, y: 420 },
+    style: { width: 260, height: 160 },
+    data: {
+      type: 'md',
+      filename: 'reading-list.md',
+      preview:
+        'Books on memory and cognition: Sapiens, Thinking Fast & Slow, A Mind for Numbers…',
+      meta: '12 items',
+    },
+  },
 ];
 
 export const initialEdges: Edge[] = [
@@ -73,4 +113,7 @@ export const initialEdges: Edge[] = [
   { id: 'e-root-mac', source: 'root', target: 'mac-native' },
   { id: 'e-spatial-notion', source: 'spatial', target: 'why-not-notion' },
   { id: 'e-local-obsidian', source: 'local-first', target: 'obsidian' },
+  { id: 'e-spatial-pdf', source: 'spatial', target: 'pdf-research' },
+  { id: 'e-spatial-pptx', source: 'spatial', target: 'pptx-deck' },
+  { id: 'e-obsidian-md', source: 'obsidian', target: 'md-reading-list' },
 ];

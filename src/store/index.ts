@@ -171,6 +171,9 @@ type State = {
   setCanvasWheelMode: (mode: 'pan' | 'zoom') => void;
   setThemesClassifier: (mode: 'auto' | 'heuristic' | 'llm') => void;
   setCanvasFontSize: (size: number) => void;
+  setNightModeAuto: (auto: boolean) => void;
+  setNightModeTheme: (theme: Theme) => void;
+  setNightModeWindow: (patch: { start?: string; end?: string }) => void;
 
   createConversation: (title?: string, projectId?: ID) => ID;
   ensureConversation: () => ID;
@@ -531,6 +534,21 @@ export const useStore = create<State>()(
               Math.min(CANVAS_FONT_SIZE_MAX, size),
             ),
           ),
+        },
+      })),
+
+    setNightModeAuto: (auto) =>
+      set((s) => ({ settings: { ...s.settings, nightModeAuto: auto } })),
+
+    setNightModeTheme: (theme) =>
+      set((s) => ({ settings: { ...s.settings, nightModeTheme: theme } })),
+
+    setNightModeWindow: ({ start, end }) =>
+      set((s) => ({
+        settings: {
+          ...s.settings,
+          ...(start !== undefined ? { nightModeStart: start } : {}),
+          ...(end !== undefined ? { nightModeEnd: end } : {}),
         },
       })),
 

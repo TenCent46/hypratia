@@ -1,3 +1,5 @@
+import { HypratiaIcon } from './HypratiaIcon';
+
 /**
  * Sticky brand bar shared by `/` (landing) and `/demo`.
  *
@@ -16,9 +18,7 @@ export function SiteHeader({ homeHref = '/' }: SiteHeaderProps) {
   return (
     <header className="demo-header">
       <a className="demo-brand" href={homeHref} aria-label="Hypratia home">
-        <span className="demo-brand-mark" aria-hidden>
-          ✦
-        </span>
+        <HypratiaIcon size={28} />
         <span className="demo-brand-name">Hypratia</span>
       </a>
       <nav className="demo-header-actions" aria-label="Primary">

@@ -1,5 +1,6 @@
 import { DemoCanvas } from './DemoCanvas';
 import { DemoChat } from './DemoChat';
+import { DemoTour } from './DemoTour';
 import { SiteHeader, DOWNLOAD_URL } from '../web/SiteHeader';
 import { SiteFooter } from '../web/SiteFooter';
 
@@ -10,10 +11,17 @@ export function DemoApp() {
 
       <div className="demo-page-intro">
         <div>
-          <h1 className="demo-page-title">Live demo</h1>
+          <h1 className="demo-page-title">
+            Live demo
+            <span className="demo-mode-badge demo-mode-badge--inline">
+              Static · no AI calls
+            </span>
+          </h1>
           <p className="demo-page-sub">
-            Drag nodes around. Paste text or images directly onto the canvas to
-            spawn new memos. Everything you see here ships in the Mac app.
+            Drag nodes around. Click <strong>+ Add memo</strong> for a new
+            Markdown node, or paste text / images straight onto the canvas.
+            Nothing leaves your browser — this page does not talk to any AI
+            provider.
           </p>
         </div>
         <a className="demo-back-link" href="/">
@@ -44,6 +52,7 @@ export function DemoApp() {
       </div>
 
       <SiteFooter />
+      <DemoTour />
     </div>
   );
 }

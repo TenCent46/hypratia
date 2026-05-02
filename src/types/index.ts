@@ -128,7 +128,13 @@ export type Edge = {
 
 export type Viewport = { x: number; y: number; zoom: number };
 
-export type Theme = 'light' | 'dark' | 'sepia' | 'high-contrast';
+export type Theme =
+  | 'light'
+  | 'dark'
+  | 'sepia'
+  | 'high-contrast'
+  | 'white'
+  | 'violet';
 
 export type ProviderId =
   | 'openai'
@@ -279,11 +285,49 @@ export type Settings = {
    * inline-code via calc(). Default 13.
    */
   canvasFontSize?: number;
+  /**
+   * Auto night theme. When enabled, the active theme is overridden to
+   * `nightModeTheme` between `nightModeStart` and `nightModeEnd`
+   * (HH:mm in local time, the window may wrap midnight). The user's
+   * day theme (`settings.theme`) is preserved and re-applied outside
+   * the night window so toggling off restores it. Default false.
+   */
+  nightModeAuto?: boolean;
+  nightModeTheme?: Theme;
+  nightModeStart?: string;
+  nightModeEnd?: string;
 };
 
 export const CANVAS_FONT_SIZE_DEFAULT = 13;
 export const CANVAS_FONT_SIZE_MIN = 8;
 export const CANVAS_FONT_SIZE_MAX = 32;
+
+export const NIGHT_MODE_DEFAULT_THEME: Theme = 'dark';
+export const NIGHT_MODE_DEFAULT_START = '19:00';
+export const NIGHT_MODE_DEFAULT_END = '07:00';
+
+/**
+ * Whether `now` falls inside the night window. Both bounds are inclusive
+ * of the start minute and exclusive of the end minute. Windows that wrap
+ * midnight (e.g. 19:00–07:00) are handled by OR-ing the two halves.
+ */
+export function isInNightWindow(
+  now: Date,
+  start: string,
+  end: string,
+): boolean {
+  const parse = (hhmm: string): number => {
+    const [h, m] = hhmm.split(':').map((v) => parseInt(v, 10));
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return -1;
+    return h * 60 + m;
+  };
+  const startMin = parse(start);
+  const endMin = parse(end);
+  if (startMin < 0 || endMin < 0 || startMin === endMin) return false;
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  if (startMin < endMin) return minutes >= startMin && minutes < endMin;
+  return minutes >= startMin || minutes < endMin;
+}
 
 /**
  * Knowledge Base editor mode.

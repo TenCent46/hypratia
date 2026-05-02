@@ -2,6 +2,7 @@ import { DemoCanvas } from '../demo/DemoCanvas';
 import { DemoChat } from '../demo/DemoChat';
 import { SiteHeader, DOWNLOAD_URL } from '../web/SiteHeader';
 import { SiteFooter } from '../web/SiteFooter';
+import { HypratiaIcon } from '../web/HypratiaIcon';
 
 const FEATURES = [
   {
@@ -43,6 +44,9 @@ export function LandingApp() {
       <SiteHeader />
 
       <section className="demo-hero">
+        <div className="demo-hero-icon" aria-hidden>
+          <HypratiaIcon size={132} shadow />
+        </div>
         <p className="demo-hero-eyebrow">Memory Canvas · Beta</p>
         <h1 className="demo-hero-title">
           Your conversations,

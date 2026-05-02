@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Hypratia">
+  <defs>
+    <clipPath id="hyp-squircle-static">
+      <rect width="1024" height="1024" rx="232" ry="232"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#hyp-squircle-static)">
+    <rect width="1024" height="1024" fill="#ffffff"/>
+    <circle cx="370" cy="570" r="225" fill="#ffb547" fill-opacity="0.92"/>
+    <rect x="375" y="315" width="430" height="380" rx="60" fill="#5ac8fa" fill-opacity="0.78"/>
+    <path d="M 120 740 C 280 580, 400 510, 520 510 S 780 380, 910 250"
+          fill="none" stroke="#14254a" stroke-width="32"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="170" cy="700" r="26" fill="#14254a"/>
+    <circle cx="340" cy="560" r="26" fill="#14254a"/>
+    <circle cx="520" cy="510" r="26" fill="#14254a"/>
+    <circle cx="700" cy="420" r="26" fill="#14254a"/>
+    <circle cx="880" cy="280" r="26" fill="#14254a"/>
+  </g>
+  <rect width="1024" height="1024" rx="232" ry="232" fill="none" stroke="rgba(20, 37, 74, 0.06)" stroke-width="2"/>
+</svg>

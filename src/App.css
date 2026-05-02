@@ -67,6 +67,42 @@
   --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.7);
 }
 
+/* Pure white & gray — Apple-style minimal. System blue accent. */
+[data-theme='white'] {
+  --bg: #ffffff;
+  --bg-soft: #f5f5f7;
+  --border: #e5e5ea;
+  --border-strong: #d1d1d6;
+  --text: #1c1c1e;
+  --text-mute: #8e8e93;
+  --accent: #007aff;
+  --accent-soft: rgba(0, 122, 255, 0.10);
+  --dot: #d8d8dd;
+  --danger: #ff3b30;
+  --danger-soft: rgba(255, 59, 48, 0.10);
+  --code-bg: #f2f2f7;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.10);
+}
+
+/* Soft white with Apple-style indigo — VS Code Light+ vibe. */
+[data-theme='violet'] {
+  --bg: #fcfbff;
+  --bg-soft: #f4f0fa;
+  --border: #e5dff2;
+  --border-strong: #cfc4e3;
+  --text: #1f1c2e;
+  --text-mute: #6a6580;
+  --accent: #5856d6;
+  --accent-soft: rgba(88, 86, 214, 0.12);
+  --dot: #ddd5ee;
+  --danger: #ff3b30;
+  --danger-soft: rgba(255, 59, 48, 0.10);
+  --code-bg: #f0eafc;
+  --shadow-card: 0 1px 2px rgba(40, 30, 70, 0.06);
+  --shadow-modal: 0 12px 40px rgba(40, 30, 70, 0.16);
+}
+
 :root {
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -2929,6 +2965,27 @@ input::placeholder {
   border-radius: 6px;
   overflow-x: auto;
 }
+/* GFM tables — `--border-strong` already adapts per theme so the grid
+   stays visible against any node surface (light/sepia/violet/dark/etc.). */
+.markdown-node .content table {
+  border-collapse: collapse;
+  border: 1px solid var(--border-strong);
+  margin: 6px 0;
+  max-width: 100%;
+  font-size: 0.95em;
+}
+.markdown-node .content th,
+.markdown-node .content td {
+  border: 1px solid var(--border-strong);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown-node .content thead th,
+.markdown-node .content th {
+  background: var(--bg-soft);
+  font-weight: 600;
+}
 .markdown-node .content img,
 .message .content img {
   max-width: 100%;
@@ -5697,6 +5754,8 @@ input::placeholder {
 .theme-card.dark .theme-swatch { background: linear-gradient(135deg, #16181c 0%, #2a2e35 100%); }
 .theme-card.sepia .theme-swatch { background: linear-gradient(135deg, #faf3e7 0%, #efe3c9 100%); }
 .theme-card.high-contrast .theme-swatch { background: linear-gradient(135deg, #000 0%, #444 100%); }
+.theme-card.white .theme-swatch { background: linear-gradient(135deg, #ffffff 0%, #d1d1d6 100%); }
+.theme-card.violet .theme-swatch { background: linear-gradient(135deg, #fcfbff 0%, #5856d6 100%); }
 
 .about-list {
   list-style: none;

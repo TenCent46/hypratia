@@ -413,6 +413,20 @@ export function useCommands(): Command[] {
         run: () => setTheme('high-contrast'),
       },
       {
+        id: 'view.theme.white',
+        title: 'Theme: White',
+        section: 'View',
+        when: () => theme !== 'white',
+        run: () => setTheme('white'),
+      },
+      {
+        id: 'view.theme.violet',
+        title: 'Theme: Violet',
+        section: 'View',
+        when: () => theme !== 'violet',
+        run: () => setTheme('violet'),
+      },
+      {
         id: 'file.settings',
         title: 'Open Settings',
         section: 'File',

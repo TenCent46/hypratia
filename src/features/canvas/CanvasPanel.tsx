@@ -318,6 +318,8 @@ export function CanvasPanel({
       dark: '#2a2e35',
       sepia: '#d6c9ae',
       'high-contrast': '#444',
+      white: '#d8d8dd',
+      violet: '#ddd5ee',
     };
     return map[theme] ?? '#e0d3b4';
   }, [theme]);

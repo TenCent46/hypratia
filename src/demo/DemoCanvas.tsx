@@ -15,11 +15,13 @@ import {
 import '@xyflow/react/dist/style.css';
 import { DemoMemoNode, type DemoMemoNodeType } from './DemoMemoNode';
 import { DemoImageNode, type DemoImageNodeType } from './DemoImageNode';
+import { DemoFileNode } from './DemoFileNode';
 import { initialNodes, initialEdges, type DemoNode } from './sampleData';
 
 const nodeTypes: NodeTypes = {
   memo: DemoMemoNode,
   image: DemoImageNode,
+  file: DemoFileNode,
 };
 
 function readBlobAsDataUrl(blob: Blob): Promise<string> {
@@ -118,8 +120,27 @@ function DemoCanvasInner() {
     return () => document.removeEventListener('paste', handlePaste);
   }, [computePastePosition]);
 
+  const addEmptyMemo = useCallback(() => {
+    const position = computePastePosition();
+    const node: DemoMemoNodeType = {
+      id: shortId('memo'),
+      type: 'memo',
+      position,
+      style: { width: 240, height: 130 },
+      data: {
+        title: 'New memo',
+        body: 'Edit me, or paste content directly onto the canvas.',
+      },
+    };
+    setNodes((current) => [...current, node]);
+  }, [computePastePosition]);
+
   return (
-    <div className="demo-canvas-wrapper" ref={wrapperRef}>
+    <div
+      className="demo-canvas-wrapper"
+      ref={wrapperRef}
+      data-tour="canvas"
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -139,6 +160,17 @@ function DemoCanvasInner() {
           color="var(--dot)"
         />
       </ReactFlow>
+      <button
+        type="button"
+        className="demo-add-memo-btn"
+        data-tour="add-memo"
+        onClick={addEmptyMemo}
+      >
+        <span className="demo-add-memo-plus" aria-hidden>
+          +
+        </span>
+        Add memo
+      </button>
       <div className="demo-canvas-hint" aria-hidden>
         Paste text or images here
         <span className="demo-canvas-hint-kbd">⌘V</span>
