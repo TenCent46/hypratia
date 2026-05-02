@@ -1195,6 +1195,49 @@ export function CanvasPanel({
     return () => window.removeEventListener('mc:focus-canvas-node', onFocusCanvasNode);
   }, [flow]);
 
+  // Cmd/Ctrl+A while the cursor is over a markdown node → text-select that
+  // node's body only (instead of the browser/React Flow default of selecting
+  // every node, or every text on the page). Skipped when an editable element
+  // (chat input, node editor textarea, etc.) has focus so its native
+  // select-all keeps working.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'a' && e.key !== 'A') return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.shiftKey || e.altKey) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (
+        active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.isContentEditable)
+      ) {
+        return;
+      }
+      // CSS :hover bubbles up the ancestor chain, so the wrapper itself
+      // matches when the cursor is anywhere inside the node — including
+      // over its rendered Markdown content.
+      const hovered = document.querySelector<HTMLElement>(
+        '.markdown-node:hover',
+      );
+      if (!hovered) return;
+      const content = hovered.querySelector<HTMLElement>(
+        '.markdown-node-content',
+      );
+      if (!content) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const range = document.createRange();
+      range.selectNodeContents(content);
+      const sel = window.getSelection();
+      if (!sel) return;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, []);
+
   // Cmd/Ctrl+V on the canvas → drop clipboard contents as new node(s). We
   // listen at document level (paste only fires on document.body when no
   // editable element is focused) and skip when the user is in any input,

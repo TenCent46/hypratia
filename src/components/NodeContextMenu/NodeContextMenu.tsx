@@ -68,6 +68,42 @@ export function NodeContextMenu({
     onClose();
   }
 
+  /**
+   * Rich copy. Puts BOTH `text/html` (the already-rendered DOM, so bold /
+   * lists / tables / code blocks survive paste into Notion / Word / Google
+   * Docs) AND `text/plain` (raw markdown) on the clipboard. Falls back to
+   * plain text when ClipboardItem is unavailable or the node hasn't been
+   * rendered to the DOM yet.
+   */
+  async function copyRich() {
+    if (!node) return;
+    const text = node.contentMarkdown ?? '';
+    const el = document.querySelector(
+      `.markdown-node-content[data-node-id="${CSS.escape(node.id)}"]`,
+    );
+    const html = el ? el.innerHTML : '';
+    if (
+      html &&
+      typeof ClipboardItem !== 'undefined' &&
+      navigator.clipboard?.write
+    ) {
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([text], { type: 'text/plain' }),
+          }),
+        ]);
+        onClose();
+        return;
+      } catch (err) {
+        console.warn('[copy] rich clipboard write failed, falling back', err);
+      }
+    }
+    await navigator.clipboard.writeText(text);
+    onClose();
+  }
+
   async function showInFinder() {
     if (!attachment) return;
     try {
@@ -117,6 +153,9 @@ export function NodeContextMenu({
     >
       <button type="button" onClick={openEditor}>
         Open in editor
+      </button>
+      <button type="button" onClick={copyRich}>
+        Copy
       </button>
       <button type="button" onClick={copyAsMarkdown}>
         Copy as Markdown
