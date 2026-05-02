@@ -6,6 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import { preprocessMarkdown, safeForStreaming } from './preprocess';
 import {
+  buildCitationHref,
   parseCitationHref,
   parseCitationText,
   rehypeKnowledgeCitations,
@@ -27,6 +28,7 @@ type HastRoot = { type: 'root'; children: HastChild[] };
 
 const MAX_TRANSCLUDE_DEPTH = 2;
 const TranscludeStack = createContext<readonly string[]>([]);
+const loggedAnchorRenders = new Set<string>();
 
 const CALLOUT_RE = /^\[callout:(\w+)\]\s*(.*)$/;
 
@@ -74,6 +76,39 @@ function extractText(node: ReactNode): string {
     return extractText((node as { props: { children: ReactNode } }).props.children);
   }
   return '';
+}
+
+function makePdfLinkDebugId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function compactDebugValue(value: string | undefined): string {
+  return JSON.stringify(value ?? '');
+}
+
+function shouldLogAnchor(href: string | undefined, label: string): boolean {
+  const text = `${href ?? ''} ${label}`.toLowerCase();
+  return (
+    text.includes('.pdf') ||
+    text.includes('mc:cite/') ||
+    text.includes('p.') ||
+    text.includes('pp.') ||
+    text.includes('sentences ')
+  );
+}
+
+function logAnchorRenderOnce(href: string | undefined, label: string): void {
+  if (!shouldLogAnchor(href, label)) return;
+  const key = `${href ?? ''}\n${label}`;
+  if (loggedAnchorRenders.has(key)) return;
+  loggedAnchorRenders.add(key);
+  console.info(
+    `[mc:pdf-link] 00 markdown anchor render href=${compactDebugValue(
+      href,
+    )} label=${compactDebugValue(label)}`,
+  );
 }
 
 function Wikilink({ id, label }: { id: string; label: string }) {
@@ -284,15 +319,35 @@ function CitationLink({
   parsed: ReturnType<typeof parseCitationHref>;
   children?: ReactNode;
 }) {
+  const label = extractText(children);
   return (
     <a
       href={href}
       className="kb-citation"
+      onPointerDown={() => {
+        console.info(
+          `[mc:pdf-link] 01p CitationLink pointerdown href=${compactDebugValue(
+            href,
+          )} label=${compactDebugValue(label)}`,
+        );
+      }}
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
+        const debugId = makePdfLinkDebugId('cite');
+        console.info(
+          `[mc:pdf-link] 01 CitationLink click debugId=${debugId} href=${compactDebugValue(
+            href,
+          )} label=${compactDebugValue(label)} parsed=${compactDebugValue(
+            JSON.stringify(parsed),
+          )}`,
+        );
         if (!parsed) {
-          console.warn('[mc:cite] click ignored — href could not be parsed', href);
+          console.warn('[mc:pdf-link] 01b citation href parse failed', {
+            debugId,
+            href,
+            label,
+          });
           return;
         }
         console.info('[mc:cite] citation clicked', parsed);
@@ -301,7 +356,7 @@ function CitationLink({
         // preview tab (with pageStart for PDFs).
         window.dispatchEvent(
           new CustomEvent('mc:open-knowledge-citation', {
-            detail: parsed,
+            detail: { ...parsed, debugId },
           }),
         );
       }}
@@ -334,39 +389,80 @@ function LocalFileLink({
   return (
     <a
       href={href}
+      onPointerDown={() => {
+        console.info(
+          `[mc:pdf-link] 01p LocalFileLink pointerdown href=${compactDebugValue(
+            href,
+          )} label=${compactDebugValue(label)}`,
+        );
+      }}
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
+        const debugId = makePdfLinkDebugId('file');
+        console.info(
+          `[mc:pdf-link] 01 LocalFileLink click debugId=${debugId} href=${compactDebugValue(
+            href,
+          )} label=${compactDebugValue(label)}`,
+        );
         const citation = parseCitationText(label);
         if (citation) {
+          console.info(
+            `[mc:pdf-link] 02 label parsed as citation debugId=${debugId} citation=${compactDebugValue(
+              JSON.stringify(citation),
+            )}`,
+          );
           window.dispatchEvent(
             new CustomEvent('mc:open-knowledge-citation', {
-              detail: citation,
+              detail: { ...citation, debugId },
             }),
           );
           return;
         }
         const target = localLinkTarget(href);
-        if (!target) return;
+        console.info(
+          `[mc:pdf-link] 02 local link target resolved debugId=${debugId} target=${compactDebugValue(
+            target,
+          )}`,
+        );
+        if (!target) {
+          console.warn('[mc:pdf-link] 02b empty local target', { debugId, href });
+          return;
+        }
         if (isMarkdownHref(target)) {
+          console.info(
+            `[mc:pdf-link] 03 dispatch open markdown file debugId=${debugId} path=${compactDebugValue(
+              target.split('#')[0],
+            )}`,
+          );
           window.dispatchEvent(
             new CustomEvent('mc:open-markdown-file', {
-              detail: { path: target.split('#')[0] },
+              detail: { path: target.split('#')[0], debugId },
             }),
           );
           return;
         }
         if (!target.includes('/')) {
+          console.info(
+            `[mc:pdf-link] 03 dispatch filename citation fallback debugId=${debugId} filename=${compactDebugValue(
+              target,
+            )}`,
+          );
           window.dispatchEvent(
             new CustomEvent('mc:open-knowledge-citation', {
-              detail: { filename: target },
+              detail: { filename: target, debugId },
             }),
           );
           return;
         }
+        console.info(
+          `[mc:pdf-link] 03 dispatch direct knowledge preview debugId=${debugId} path=${compactDebugValue(
+            target,
+          )}`,
+        );
         window.dispatchEvent(
           new CustomEvent('mc:open-knowledge-file-preview', {
-            detail: { path: target },
+            detail: { path: target, debugId },
           }),
         );
       }}
@@ -454,9 +550,10 @@ function MarkdownRendererImpl({
           );
         },
         a({ href, children, ...rest }) {
+          const label = extractText(children);
+          logAnchorRenderOnce(href, label);
           if (href && href.startsWith('mc:wikilink/')) {
             const id = decodeURIComponent(href.slice('mc:wikilink/'.length));
-            const label = extractText(children);
             return <Wikilink id={id} label={label} />;
           }
           if (href && href.startsWith('mc:transclude/')) {
@@ -472,6 +569,22 @@ function MarkdownRendererImpl({
                 </CitationLink>
               );
             }
+          }
+          const labelCitation = parseCitationText(label);
+          if (labelCitation) {
+            const citationHref = buildCitationHref(labelCitation);
+            console.info(
+              `[mc:pdf-link] 00b repaired malformed citation anchor href=${compactDebugValue(
+                href,
+              )} label=${compactDebugValue(label)} citationHref=${compactDebugValue(
+                citationHref,
+              )}`,
+            );
+            return (
+              <CitationLink href={citationHref} parsed={labelCitation}>
+                {children}
+              </CitationLink>
+            );
           }
           const isExternal = !!href && /^https?:\/\//.test(href);
           const isSpecial =

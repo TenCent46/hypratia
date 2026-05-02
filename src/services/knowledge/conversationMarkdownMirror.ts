@@ -60,6 +60,7 @@ export type MirrorResult = {
   incognitoSkipped: number;
   skipped: number;
   deletedLinks: { conversationId: string; path: string }[];
+  repairedConflicts: { originalPath: string; archivedPath: string; reason: string }[];
   errors: { conversationId: string; reason: string }[];
 };
 
@@ -620,6 +621,33 @@ async function migrateLegacyInstructionFile(
   }
 }
 
+function conflictArchivePath(originalPath: string, reason: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const safeReason = safeBaseSlug(reason).slice(0, 80) || 'mirror-conflict';
+  return `_conflicts/mirror/${stamp}-${safeReason}/${originalPath}`;
+}
+
+async function archiveMirrorConflict(
+  rootPath: string,
+  originalPath: string,
+  content: string,
+  reason: string,
+): Promise<string> {
+  let archivePath = conflictArchivePath(originalPath, reason);
+  for (let i = 2; ; i += 1) {
+    if ((await tryReadMarkdownFile(rootPath, archivePath)) === null) break;
+    archivePath = `${conflictArchivePath(originalPath, reason)}-${i}`;
+  }
+  await writeMarkdownFileEnsuringDirs(rootPath, archivePath, content);
+  await markdownFiles.deletePath(rootPath, originalPath);
+  console.warn('[knowledge-mirror] archived conflicting mirror file', {
+    originalPath,
+    archivePath,
+    reason,
+  });
+  return archivePath;
+}
+
 function defaultInstructionTemplate(): string {
   return buildMarkdown(
     {
@@ -798,6 +826,7 @@ export async function syncConversationMirror(
     incognitoSkipped: 0,
     skipped: 0,
     deletedLinks: [],
+    repairedConflicts: [],
     errors: [],
   };
 
@@ -888,12 +917,27 @@ export async function syncConversationMirror(
       // already deleted any stale mirror file, so reaching here with
       // a non-matching filename means a deliberate user collision.
       if (existing !== null && !pathBelongsToId(path, conv.id)) {
-        result.skipped += 1;
-        result.errors.push({
-          conversationId: conv.id,
-          reason: `path ${path} doesn't carry our id suffix; refusing to clobber a user-named file`,
-        });
-        continue;
+        const reason = "conversation path doesn't carry the mirror id suffix";
+        try {
+          const archivedPath = await archiveMirrorConflict(
+            rootPath,
+            path,
+            existing,
+            reason,
+          );
+          result.repairedConflicts.push({
+            originalPath: path,
+            archivedPath,
+            reason,
+          });
+        } catch (err) {
+          result.skipped += 1;
+          result.errors.push({
+            conversationId: conv.id,
+            reason: `path ${path} doesn't carry our id suffix; conflict archive failed: ${String(err)}`,
+          });
+          continue;
+        }
       }
       const content = buildContent(conv, messages, project);
       await writeMarkdownFileEnsuringDirs(rootPath, path, content);
@@ -927,12 +971,27 @@ export async function syncConversationMirror(
       await removeStaleNodeMirror(rootPath, node.id, path);
       const existing = await tryReadMarkdownFile(rootPath, path);
       if (existing !== null && !pathBelongsToId(path, node.id)) {
-        result.skipped += 1;
-        result.errors.push({
-          conversationId: node.conversationId,
-          reason: `path ${path} doesn't carry our id suffix; refusing to clobber a user-named file`,
-        });
-        continue;
+        const reason = "node path doesn't carry the mirror id suffix";
+        try {
+          const archivedPath = await archiveMirrorConflict(
+            rootPath,
+            path,
+            existing,
+            reason,
+          );
+          result.repairedConflicts.push({
+            originalPath: path,
+            archivedPath,
+            reason,
+          });
+        } catch (err) {
+          result.skipped += 1;
+          result.errors.push({
+            conversationId: node.conversationId,
+            reason: `path ${path} doesn't carry our id suffix; conflict archive failed: ${String(err)}`,
+          });
+          continue;
+        }
       }
       await writeMarkdownFileEnsuringDirs(
         rootPath,
@@ -982,12 +1041,27 @@ export async function syncConversationMirror(
     try {
       const existing = await tryReadMarkdownFile(rootPath, path);
       if (!ownsEdgesFile(existing)) {
-        result.skipped += 1;
-        result.errors.push({
-          conversationId: project ? `project:${project.id}` : 'default',
-          reason: `existing edges file at ${path} is not owned by the mirror`,
-        });
-        continue;
+        const reason = 'edges file is not owned by the mirror';
+        try {
+          const archivedPath = await archiveMirrorConflict(
+            rootPath,
+            path,
+            existing ?? '',
+            reason,
+          );
+          result.repairedConflicts.push({
+            originalPath: path,
+            archivedPath,
+            reason,
+          });
+        } catch (err) {
+          result.skipped += 1;
+          result.errors.push({
+            conversationId: project ? `project:${project.id}` : 'default',
+            reason: `existing edges file at ${path} is not owned by the mirror; conflict archive failed: ${String(err)}`,
+          });
+          continue;
+        }
       }
       const content = buildEdgesContent(
         project ? { kind: 'project', project } : { kind: 'default' },

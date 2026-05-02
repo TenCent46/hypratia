@@ -15,15 +15,34 @@ export type ImageNodeType = Node<ImageNodeData, 'image'>;
 function ImageNodeImpl({ data, selected }: NodeProps<ImageNodeType>) {
   const att = useStore((s) => s.attachments.find((a) => a.id === data.attachmentId));
   const [url, setUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!att) return;
     let on = true;
-    attachments.toUrl(att).then((u) => {
-      if (on) setUrl(u);
-    });
+    let objectUrl: string | null = null;
+    attachments
+      .readBytes(att)
+      .then((bytes) => {
+        objectUrl = URL.createObjectURL(
+          new Blob([bytes.slice()], {
+            type: att.mimeType || 'application/octet-stream',
+          }),
+        );
+        if (on) {
+          setLoadError(null);
+          setUrl(objectUrl);
+        }
+      })
+      .catch((err) => {
+        if (on) {
+          setUrl(null);
+          setLoadError(err instanceof Error ? err.message : String(err));
+        }
+      });
     return () => {
       on = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [att]);
 
@@ -57,10 +76,26 @@ function ImageNodeImpl({ data, selected }: NodeProps<ImageNodeType>) {
         <NodeHandles />
         {data.title ? <div className="title">{data.title}</div> : null}
         <div className="content image-content">
-          {url ? (
-            <img src={url} alt={data.title} />
+          {loadError ? (
+            <div className="image-node-error">
+              <strong>Preview unavailable</strong>
+              <span>{loadError}</span>
+            </div>
+          ) : url ? (
+            <img
+              src={url}
+              alt={data.title}
+              onError={() => {
+                setUrl(null);
+                setLoadError(
+                  att?.mimeType === 'image/heic' || att?.mimeType === 'image/heif'
+                    ? 'HEIC preview is not supported by this WebView. Double-click to open it externally.'
+                    : 'Image preview failed. Double-click to open it externally.',
+                );
+              }}
+            />
           ) : (
-            <div className="muted">Image not found</div>
+            <div className="muted">Loading image...</div>
           )}
         </div>
       </div>

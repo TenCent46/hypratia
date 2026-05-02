@@ -215,8 +215,18 @@ export async function hydrateAndWire(): Promise<void> {
         (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0,
       );
       console.info(
-        `[knowledge-mirror] runMirror done in ${dt}ms: rootPath=${result.rootPath} written=${result.written} nodeWritten=${result.nodeWritten} edgesWritten=${result.edgesWritten} skipped=${result.skipped} incognitoSkipped=${result.incognitoSkipped} errors=${result.errors.length}`,
+        `[knowledge-mirror] runMirror done in ${dt}ms: rootPath=${result.rootPath} written=${result.written} nodeWritten=${result.nodeWritten} edgesWritten=${result.edgesWritten} repairedConflicts=${result.repairedConflicts.length} skipped=${result.skipped} incognitoSkipped=${result.incognitoSkipped} errors=${result.errors.length}`,
       );
+      if (result.repairedConflicts.length > 0) {
+        console.warn(
+          `[knowledge-mirror] repaired ${result.repairedConflicts.length} mirror conflict(s):`,
+        );
+        for (const repair of result.repairedConflicts) {
+          console.warn(
+            `[knowledge-mirror] · archived ${repair.originalPath} -> ${repair.archivedPath} (${repair.reason})`,
+          );
+        }
+      }
       if (result.errors.length > 0) {
         // Log each error on its own line so they survive aggressive
         // devtools log filters (a single `console.warn(arr)` call hides

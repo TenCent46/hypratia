@@ -12,12 +12,33 @@ const MIME_BY_EXT: Record<string, string> = {
   csv: 'text/csv',
   doc: 'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
   md: 'text/markdown',
+  png: 'image/png',
   ppt: 'application/vnd.ms-powerpoint',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
   txt: 'text/plain',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
+
+const IMAGE_EXTENSIONS = new Set([
+  'apng',
+  'avif',
+  'gif',
+  'heic',
+  'heif',
+  'jpeg',
+  'jpg',
+  'png',
+  'svg',
+  'webp',
+]);
 
 function extFromName(name: string): string {
   return name.split('.').pop()?.toLowerCase() ?? '';
@@ -42,6 +63,25 @@ function isPreviewableDocument(file: File): boolean {
   return file.type.startsWith('text/');
 }
 
+function isImageFile(file: File): boolean {
+  return file.type.startsWith('image/') || IMAGE_EXTENSIONS.has(extFromName(file.name));
+}
+
+function fitImageNodeSize(
+  width: number | undefined,
+  height: number | undefined,
+): { width: number; height: number } {
+  const fallback = { width: 320, height: 220 };
+  if (!width || !height || width <= 0 || height <= 0) return fallback;
+  const maxWidth = 420;
+  const maxHeight = 320;
+  const scale = Math.min(maxWidth / width, maxHeight / height, 1);
+  return {
+    width: Math.max(160, Math.round(width * scale)),
+    height: Math.max(120, Math.round(height * scale)),
+  };
+}
+
 export async function ingestDroppedFiles(
   files: File[],
   conversationId: ID,
@@ -52,7 +92,7 @@ export async function ingestDroppedFiles(
 
   let i = 0;
   for (const file of files) {
-    const isImage = file.type.startsWith('image/');
+    const isImage = isImageFile(file);
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
     const isDoc = isPreviewableDocument(file);
     if (!isImage && !isPdf && !isDoc) continue;
@@ -66,7 +106,9 @@ export async function ingestDroppedFiles(
       suggestedName: file.name || (isPdf ? 'document.pdf' : 'file'),
       mimeType:
         file.type ||
-        (isPdf ? 'application/pdf' : MIME_BY_EXT[ext] ?? 'application/octet-stream'),
+        (isPdf
+          ? 'application/pdf'
+          : MIME_BY_EXT[ext] ?? 'application/octet-stream'),
       conversationId,
     });
 
@@ -76,12 +118,14 @@ export async function ingestDroppedFiles(
     }
 
     addAttachment(att);
+    const imageSize = isImage ? fitImageNodeSize(att.width, att.height) : null;
     addNode({
       conversationId,
       kind: isPdf ? 'pdf' : isImage ? 'image' : 'artifact',
       title,
       contentMarkdown: '',
       position: { x: position.x + i * 24, y: position.y + i * 24 },
+      ...(imageSize ? imageSize : {}),
       tags: [isPdf ? 'pdf' : isImage ? 'image' : `file:${ext || 'unknown'}`],
       attachmentIds: [att.id],
     });

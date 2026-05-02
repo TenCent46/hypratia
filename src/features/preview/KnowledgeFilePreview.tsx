@@ -18,6 +18,10 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+console.info('[mc:pdf-link] PDF worker configured for KnowledgeFilePreview', {
+  workerSrc: pdfWorkerUrl,
+  pdfjsVersion: pdfjs.version,
+});
 
 type PreviewState =
   | { kind: 'loading' }
@@ -97,6 +101,14 @@ export function KnowledgeFilePreview({
   const [bodyRef, bodyWidth] = useElementClientWidth<HTMLDivElement>();
 
   useEffect(() => {
+    console.info('[mc:pdf-link] 08 KnowledgeFilePreview load effect', {
+      path,
+      ext,
+      pageStart,
+      sentenceStart,
+      sentenceEnd,
+      markdownStorageDir,
+    });
     console.info('[mc:loading] KnowledgeFilePreview mount/load-trigger', {
       path,
       ext,
@@ -109,6 +121,11 @@ export function KnowledgeFilePreview({
       try {
         const root = await resolveMarkdownRoot(markdownStorageDir);
         const abs = await joinKnowledgePath(root, path);
+        console.info('[mc:pdf-link] 09 resolved knowledge absolute path', {
+          path,
+          root,
+          abs,
+        });
         console.info('[mc:loading] KnowledgeFilePreview abs path', { root, path, abs });
         const data = await readKnowledgeBytes(abs);
         if (!alive) {
@@ -116,8 +133,21 @@ export function KnowledgeFilePreview({
           return;
         }
         setBytes(data.byteLength);
+        console.info('[mc:pdf-link] 10 read knowledge bytes', {
+          path,
+          ext,
+          bytes: data.byteLength,
+          firstBytes: Array.from(data.slice(0, 12)),
+        });
         console.info('[mc:loading] KnowledgeFilePreview read bytes', { path, bytes: data.byteLength });
         if (ext === 'pdf') {
+          console.info('[mc:pdf-link] 11 creating PDF Blob source', {
+            path,
+            bytes: data.byteLength,
+            mime: 'application/pdf',
+            workerSrc: pdfjs.GlobalWorkerOptions.workerSrc,
+            pdfjsVersion: pdfjs.version,
+          });
           setState({
             kind: 'pdf',
             source: new Blob([data.slice()], { type: 'application/pdf' }),
@@ -154,6 +184,11 @@ export function KnowledgeFilePreview({
             'No inline preview is available for this binary file. Open it externally or reveal it in Finder.',
         });
       } catch (err) {
+        console.error('[mc:pdf-link] 10b KnowledgeFilePreview load failed', {
+          path,
+          ext,
+          err,
+        });
         console.error('[mc:loading] KnowledgeFilePreview load failed', { path, err });
         if (alive) setState({ kind: 'error', message: String(err) });
       }
@@ -301,11 +336,26 @@ function KnowledgePdfPreview({
       <Document
         file={source}
         onLoadSuccess={({ numPages }) => {
+          console.info('[mc:pdf-link] 12 PDF Document load success', {
+            numPages,
+            pageStart,
+            sourceSize: source.size,
+            workerSrc: pdfjs.GlobalWorkerOptions.workerSrc,
+            pdfjsVersion: pdfjs.version,
+          });
           console.info('[mc:loading] PDF loaded', { numPages, pageStart });
           setLoadError(null);
           setNumPages(numPages);
         }}
         onLoadError={(err) => {
+          console.error('[mc:pdf-link] 12b PDF Document load error', {
+            message: err instanceof Error ? err.message : String(err),
+            err,
+            pageStart,
+            sourceSize: source.size,
+            workerSrc: pdfjs.GlobalWorkerOptions.workerSrc,
+            pdfjsVersion: pdfjs.version,
+          });
           console.error('[mc:loading] PDF load error', err);
           setLoadError(err instanceof Error ? err.message : String(err));
         }}

@@ -33,12 +33,15 @@ function extFromName(name: string): string {
 
 function mimeFromExt(ext: string): string {
   switch (ext) {
+    case 'avif': return 'image/avif';
     case 'png': return 'image/png';
     case 'jpg':
     case 'jpeg': return 'image/jpeg';
     case 'gif': return 'image/gif';
     case 'webp': return 'image/webp';
     case 'svg': return 'image/svg+xml';
+    case 'heic': return 'image/heic';
+    case 'heif': return 'image/heif';
     case 'pdf': return 'application/pdf';
     case 'csv': return 'text/csv';
     case 'txt': return 'text/plain';
@@ -88,6 +91,18 @@ async function readImageDimensions(
     img.onerror = () => resolve(null);
     img.src = url;
   });
+}
+
+async function readImageDimensionsFromBytes(
+  bytes: Uint8Array,
+  mimeType: string,
+): Promise<{ width: number; height: number } | null> {
+  const url = URL.createObjectURL(new Blob([bytes.slice()], { type: mimeType }));
+  try {
+    return await readImageDimensions(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function safeFilename(name: string, fallbackExt: string): string {
@@ -257,8 +272,11 @@ export class TauriAttachmentService implements AttachmentService {
 
       if (att.kind === 'image') {
         try {
-          const url = convertFileSrc(absPath);
-          const dim = await readImageDimensions(url);
+          const buf = await readFile(absPath);
+          const dim = await readImageDimensionsFromBytes(
+            buf instanceof Uint8Array ? buf : new Uint8Array(buf),
+            mimeType,
+          );
           if (dim) {
             att.width = dim.width;
             att.height = dim.height;
@@ -319,8 +337,11 @@ export class TauriAttachmentService implements AttachmentService {
 
     if (att.kind === 'image') {
       try {
-        const url = convertFileSrc(absPath);
-        const dim = await readImageDimensions(url);
+        const buf = await readFile(absPath);
+        const dim = await readImageDimensionsFromBytes(
+          buf instanceof Uint8Array ? buf : new Uint8Array(buf),
+          mimeType,
+        );
         if (dim) {
           att.width = dim.width;
           att.height = dim.height;

@@ -24,6 +24,14 @@ type HastRoot = { type: 'root'; children: HastChild[] };
 const CITATION_RE =
   /\[([^,[\]]+\.[A-Za-z0-9]{1,8}),\s*(?:(pp?\.)\s*(\d+)(?:-(\d+))?|sentences\s+(\d+)-(\d+))\s*\]/g;
 
+// Some model outputs accidentally wrap citations in malformed Markdown
+// links, e.g. `[Democracy.pdf, pp. 13-14](''')`. ReactMarkdown then
+// emits an <a href="'''"> whose label may no longer include the closing
+// bracket. This relaxed parser lets the click handler recover the
+// citation from the visible label instead of following the broken href.
+const LOOSE_CITATION_RE =
+  /\[?\s*([^,[\]]+\.[A-Za-z0-9]{1,8}),\s*(?:(pp?\.)\s*(\d+)(?:-(\d+))?|sentences\s+(\d+)-(\d+))\s*\]?/;
+
 export type ParsedCitation = {
   raw: string;
   filename: string;
@@ -56,7 +64,9 @@ function parseMatch(match: RegExpMatchArray): ParsedCitation | null {
 export function parseCitationText(text: string): ParsedCitation | null {
   CITATION_RE.lastIndex = 0;
   const match = CITATION_RE.exec(text);
-  return match ? parseMatch(match) : null;
+  if (match) return parseMatch(match);
+  const loose = LOOSE_CITATION_RE.exec(text);
+  return loose ? parseMatch(loose) : null;
 }
 
 export function buildCitationHref(c: ParsedCitation): string {

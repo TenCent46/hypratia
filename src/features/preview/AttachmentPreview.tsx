@@ -99,6 +99,7 @@ function AttachmentPreviewInner({
 
   useEffect(() => {
     let alive = true;
+    let imageObjectUrl: string | null = null;
     async function load() {
       console.info('[mc:loading] AttachmentPreview load start', {
         attachmentId: attachment.id,
@@ -109,8 +110,15 @@ function AttachmentPreviewInner({
       setState({ kind: 'loading' });
       try {
         if (attachment.kind === 'image') {
-          const url = await attachments.toUrl(attachment);
+          const bytes = await attachments.readBytes(attachment);
+          const url = URL.createObjectURL(
+            new Blob([bytes.slice()], {
+              type: attachment.mimeType || 'application/octet-stream',
+            }),
+          );
+          imageObjectUrl = url;
           if (alive) setState({ kind: 'image', url });
+          else URL.revokeObjectURL(url);
           return;
         }
         if (attachment.kind === 'pdf' || ext === 'pdf') {
@@ -158,6 +166,7 @@ function AttachmentPreviewInner({
     void load();
     return () => {
       alive = false;
+      if (imageObjectUrl) URL.revokeObjectURL(imageObjectUrl);
     };
   }, [attachment, ext]);
 
@@ -325,7 +334,20 @@ function AttachmentPreviewInner({
         ) : null}
         {state.kind === 'image' ? (
           <div className="attachment-preview-image">
-            <img src={state.url} alt={displayName ?? attachment.filename} />
+            <img
+              src={state.url}
+              alt={displayName ?? attachment.filename}
+              onError={() => {
+                setState({
+                  kind: 'unsupported',
+                  reason:
+                    attachment.mimeType === 'image/heic' ||
+                    attachment.mimeType === 'image/heif'
+                      ? 'This WebView cannot preview HEIC/HEIF inline. Use Open externally or Reveal to open it with macOS.'
+                      : 'Image preview failed. Use Open externally or Reveal to inspect the file.',
+                });
+              }}
+            />
           </div>
         ) : null}
         {state.kind === 'pdf' ? (

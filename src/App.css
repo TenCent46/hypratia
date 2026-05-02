@@ -2853,6 +2853,20 @@ input::placeholder {
   object-fit: contain;
   display: block;
 }
+.image-node-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  color: var(--text-mute);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+}
+.image-node-error strong {
+  color: var(--text);
+  font-size: 13px;
+}
 .mc-resize-line {
   border-color: var(--accent) !important;
 }

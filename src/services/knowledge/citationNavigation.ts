@@ -26,6 +26,8 @@ export type CitationOpenRequest = CitationDescriptor & {
   /** Optional project hint used to disambiguate same-named files across
    *  workspaces. Falls back to the active conversation's project. */
   projectName?: string;
+  /** Debug correlation id propagated from the clicked markdown link. */
+  debugId?: string;
 };
 
 export type ResolvedCitation = {
@@ -75,15 +77,32 @@ async function readDocuments(processedDir: string): Promise<{
     await joinKnowledgePath(rootPath, processedDir),
     DOCUMENTS_FILENAME,
   );
+  console.info('[mc:pdf-link] 05a read processed documents', {
+    processedDir,
+    docsPath,
+  });
   if (!(await knowledgePathExists(docsPath))) {
+    console.warn('[mc:pdf-link] 05b documents.json missing', {
+      processedDir,
+      docsPath,
+    });
     return { rootPath, documents: [] };
   }
   try {
     const text = await readKnowledgeText(docsPath);
     const parsed = JSON.parse(text) as KnowledgeDocumentRecord[];
+    console.info('[mc:pdf-link] 05c documents.json parsed', {
+      processedDir,
+      docsPath,
+      documents: Array.isArray(parsed) ? parsed.length : 0,
+    });
     return { rootPath, documents: Array.isArray(parsed) ? parsed : [] };
   } catch (err) {
-    console.warn('[citation] documents.json parse failed', processedDir, err);
+    console.warn('[mc:pdf-link] 05d documents.json parse failed', {
+      processedDir,
+      docsPath,
+      err,
+    });
     return { rootPath, documents: [] };
   }
 }
@@ -134,10 +153,23 @@ export async function resolveCitation(
   for (const p of allProjects) pushProbe(`project:${p.name}`, p);
 
   console.debug('[mc:cite] resolveCitation start', {
+    debugId: request.debugId,
     filename: request.filename,
     pageStart: request.pageStart,
     sentenceStart: request.sentenceStart,
     probes: probes.map((p) => p.label),
+  });
+  console.info('[mc:pdf-link] 05 resolveCitation start', {
+    debugId: request.debugId,
+    filename: request.filename,
+    targetName,
+    hintProject: hintProject?.name,
+    activeProject: activeProject?.name,
+    probes: probes.map((p) => ({
+      label: p.label,
+      processedDir: processedDirForProject(p.project),
+      projectName: p.project?.name ?? 'Default workspace',
+    })),
   });
 
   for (const probe of probes) {
@@ -147,11 +179,31 @@ export async function resolveCitation(
       const fname = doc.sourcePath.split('/').pop()?.toLowerCase();
       return fname === targetName;
     });
+    const sampleDocuments = documents.slice(0, 8).map((doc) => ({
+      sourcePath: doc.sourcePath,
+      filename: doc.sourcePath.split('/').pop(),
+      status: doc.status,
+    }));
     console.debug('[mc:cite] probe', {
+      debugId: request.debugId,
       label: probe.label,
       processedDir,
       docsTotal: documents.length,
       matchCount: matches.length,
+    });
+    console.info('[mc:pdf-link] 05e resolveCitation probe result', {
+      debugId: request.debugId,
+      label: probe.label,
+      processedDir,
+      docsTotal: documents.length,
+      matchCount: matches.length,
+      matches: matches.map((m) => ({
+        documentId: m.documentId,
+        sourcePath: m.sourcePath,
+        status: m.status,
+        error: m.error,
+      })),
+      sampleDocuments,
     });
     if (matches.length === 0) continue;
     if (matches.length > 1) {
@@ -164,10 +216,21 @@ export async function resolveCitation(
     matches.sort((a, b) => a.sourcePath.localeCompare(b.sourcePath));
     const doc = matches[0];
     console.debug('[mc:cite] resolveCitation matched', {
+      debugId: request.debugId,
       probe: probe.label,
       sourcePath: doc.sourcePath,
       documentId: doc.documentId,
       status: doc.status,
+    });
+    console.info('[mc:pdf-link] 05f resolveCitation returning match', {
+      debugId: request.debugId,
+      probe: probe.label,
+      documentId: doc.documentId,
+      sourcePath: doc.sourcePath,
+      projectName: doc.projectName,
+      status: doc.status,
+      error: doc.error,
+      requestedPageStart: request.pageStart,
     });
     return {
       documentId: doc.documentId,
@@ -183,7 +246,14 @@ export async function resolveCitation(
   }
 
   console.warn('[mc:cite] resolveCitation no match across all probes', {
+    debugId: request.debugId,
     filename: request.filename,
+    probes: probes.map((p) => p.label),
+  });
+  console.warn('[mc:pdf-link] 05z resolveCitation no match', {
+    debugId: request.debugId,
+    filename: request.filename,
+    targetName,
     probes: probes.map((p) => p.label),
   });
   return null;

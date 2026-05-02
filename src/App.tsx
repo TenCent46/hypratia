@@ -462,8 +462,16 @@ function ReadyApp() {
         pageStart?: number;
         sentenceStart?: number;
         sentenceEnd?: number;
+        debugId?: string;
       },
     ) => {
+      console.info('[mc:pdf-link] 07 openKnowledgeFilePreview()', {
+        debugId: jump?.debugId,
+        path,
+        pageStart: jump?.pageStart,
+        sentenceStart: jump?.sentenceStart,
+        sentenceEnd: jump?.sentenceEnd,
+      });
       focusOrAddWorkspaceTab(
         {
           id: knowledgeFileTabId(path),
@@ -627,8 +635,12 @@ function ReadyApp() {
 
   useEffect(() => {
     function onOpenKnowledgeFilePreview(e: Event) {
-      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
-      if (path) openKnowledgeFilePreview(path);
+      const detail = (e as CustomEvent<{ path?: string; debugId?: string }>)
+        .detail;
+      console.info('[mc:pdf-link] 04 App received direct preview event', detail);
+      if (detail?.path) {
+        openKnowledgeFilePreview(detail.path, { debugId: detail.debugId });
+      }
     }
     function onOpenKnowledgeCitation(e: Event) {
       const detail = (e as CustomEvent<{
@@ -636,22 +648,32 @@ function ReadyApp() {
         pageStart?: number;
         sentenceStart?: number;
         sentenceEnd?: number;
+        debugId?: string;
       }>).detail;
+      console.info('[mc:pdf-link] 04 App received citation event', detail);
       console.info('[mc:cite] event received in App', detail);
       if (!detail?.filename) {
-        console.warn('[mc:cite] event ignored — missing filename', detail);
+        console.warn('[mc:pdf-link] 04b citation event missing filename', detail);
         return;
       }
       void (async () => {
         try {
+          console.info('[mc:pdf-link] 05 resolveCitation call', {
+            debugId: detail.debugId,
+            filename: detail.filename,
+            pageStart: detail.pageStart,
+            sentenceStart: detail.sentenceStart,
+            sentenceEnd: detail.sentenceEnd,
+          });
           const resolved = await resolveCitation({
             filename: detail.filename!,
             pageStart: detail.pageStart,
             sentenceStart: detail.sentenceStart,
             sentenceEnd: detail.sentenceEnd,
+            debugId: detail.debugId,
           });
           if (!resolved) {
-            console.warn('[mc:cite] resolveCitation returned null', detail);
+            console.warn('[mc:pdf-link] 06 resolveCitation returned null', detail);
             // Surface the failure via the existing knowledge sync toast
             // channel so the user sees feedback even when devtools is
             // closed. If the KB panel isn't mounted, the warn above is
@@ -670,13 +692,28 @@ function ReadyApp() {
             pageStart: resolved.pageStart,
             status: resolved.status,
           });
+          console.info('[mc:pdf-link] 06 resolveCitation matched', {
+            debugId: detail.debugId,
+            sourcePath: resolved.sourcePath,
+            pageStart: resolved.pageStart,
+            pageEnd: resolved.pageEnd,
+            sentenceStart: resolved.sentenceStart,
+            sentenceEnd: resolved.sentenceEnd,
+            status: resolved.status,
+            error: resolved.error,
+          });
           openKnowledgeFilePreview(resolved.sourcePath, {
             pageStart: resolved.pageStart,
             sentenceStart: resolved.sentenceStart,
             sentenceEnd: resolved.sentenceEnd,
+            debugId: detail.debugId,
           });
         } catch (err) {
-          console.error('[mc:cite] resolveCitation threw', err, detail);
+          console.error('[mc:pdf-link] 06b resolveCitation threw', {
+            debugId: detail.debugId,
+            err,
+            detail,
+          });
           window.dispatchEvent(
             new CustomEvent('mc:knowledge-sync', {
               detail: {
