@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownRenderer } from '../../services/markdown/MarkdownRenderer';
+import { htmlToMarkdown } from '../../services/markdown/htmlToMarkdown';
 import { handleObsidianShortcut } from '../../lib/textareaShortcuts';
 
 type Mode = 'edit' | 'preview' | 'split';
@@ -8,7 +9,11 @@ type Format = 'h2' | 'bold' | 'italic' | 'quote' | 'code' | 'link' | 'bullet' | 
 type Props = {
   value: string;
   onChange: (value: string) => void;
-  onCommit: () => void;
+  onCommit?: () => void;
+  onSubmit?: () => void;
+  onCancel?: () => void;
+  compact?: boolean;
+  autoFocus?: boolean;
 };
 
 const ACTIONS: { id: Format; label: string; title: string }[] = [
@@ -66,13 +71,27 @@ function applyFormat(value: string, start: number, end: number, format: Format) 
   }
 }
 
-export function MarkdownEditor({ value, onChange, onCommit }: Props) {
+export function MarkdownEditor({
+  value,
+  onChange,
+  onCommit,
+  onSubmit,
+  onCancel,
+  compact,
+  autoFocus,
+}: Props) {
   const [mode, setMode] = useState<Mode>('edit');
   const taRef = useRef<HTMLTextAreaElement>(null);
   const wordCount = useMemo(
     () => value.trim().split(/\s+/).filter(Boolean).length,
     [value],
   );
+
+  useEffect(() => {
+    if (autoFocus && mode !== 'preview') {
+      taRef.current?.focus();
+    }
+  }, [autoFocus, mode]);
 
   function format(action: Format) {
     const textarea = taRef.current;
@@ -86,14 +105,58 @@ export function MarkdownEditor({ value, onChange, onCommit }: Props) {
     });
   }
 
+  // Keep textarea focus when toolbar/mode buttons are clicked. Without this,
+  // clicking a toolbar button blurs the textarea, and a parent that closes
+  // on blur (e.g. inline canvas editing) would tear down the editor mid-edit.
+  const keepFocus = (e: React.MouseEvent) => e.preventDefault();
+
+  // Rich-paste handler. When the clipboard carries `text/html` (e.g. content
+  // copied from ChatGPT, Claude, web pages, or word processors), convert it
+  // to Markdown so bold / lists / code / links survive the round-trip. If
+  // there's no HTML payload we let the browser do its default plain-text
+  // paste — that's the right behavior for terminal output, code editors, etc.
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const html = e.clipboardData.getData('text/html');
+    if (!html.trim()) return;
+    e.preventDefault();
+    const ta = e.currentTarget;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = value;
+    void (async () => {
+      const md = await htmlToMarkdown(html);
+      if (!md) {
+        // Conversion failed; fall back to the plain-text version of the
+        // clipboard if any, so the user isn't left with a no-op paste.
+        const plain = e.clipboardData.getData('text/plain');
+        if (!plain) return;
+        const next = before.slice(0, start) + plain + before.slice(end);
+        onChange(next);
+        return;
+      }
+      const next = before.slice(0, start) + md + before.slice(end);
+      onChange(next);
+      requestAnimationFrame(() => {
+        const node = taRef.current;
+        if (!node) return;
+        const cursor = start + md.length;
+        node.focus();
+        node.setSelectionRange(cursor, cursor);
+      });
+    })();
+  }
+
   return (
-    <div className={`markdown-editor mode-${mode}`}>
+    <div
+      className={`markdown-editor mode-${mode}${compact ? ' compact' : ''}`}
+    >
       <div className="markdown-editor-toolbar" aria-label="Markdown formatting">
         <div className="editor-actions">
           {ACTIONS.map((action) => (
             <button
               key={action.id}
               type="button"
+              onMouseDown={keepFocus}
               onClick={() => format(action.id)}
               title={action.title}
               aria-label={action.title}
@@ -108,6 +171,7 @@ export function MarkdownEditor({ value, onChange, onCommit }: Props) {
               key={m}
               type="button"
               className={mode === m ? 'active' : ''}
+              onMouseDown={keepFocus}
               onClick={() => setMode(m)}
             >
               {m}
@@ -119,18 +183,30 @@ export function MarkdownEditor({ value, onChange, onCommit }: Props) {
         {mode !== 'preview' ? (
           <textarea
             ref={taRef}
+            autoFocus={autoFocus}
             value={value}
             onChange={(e) => onChange(e.target.value)}
+            onPaste={onPaste}
             onBlur={onCommit}
-            onKeyDown={(e) =>
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                onSubmit?.();
+                return;
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                onCancel?.();
+                return;
+              }
               handleObsidianShortcut(e, (next, sel) => {
                 onChange(next);
                 requestAnimationFrame(() => {
                   taRef.current?.focus();
                   taRef.current?.setSelectionRange(sel.start, sel.end);
                 });
-              })
-            }
+              });
+            }}
             rows={14}
             spellCheck
             placeholder="Write in Markdown..."

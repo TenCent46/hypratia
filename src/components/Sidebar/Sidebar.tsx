@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type RefObject } from 'react';
 import { useStore } from '../../store';
 import { confirmDangerTwice } from '../../lib/confirm';
 import type { Conversation, ID, Project } from '../../types';
 import { MarkdownFileExplorer } from '../../features/knowledge/MarkdownFileExplorer';
+import { moveConversationProjectFiles } from '../../services/knowledge/moveConversationProjectFiles';
 
 // Stroked black-and-white icons for the sidebar. Inline SVG so we don't
 // inherit an emoji font's rendering quirks; the path strokes pick up
@@ -18,6 +19,8 @@ const SIDEBAR_ICON_PROPS = {
   strokeLinejoin: 'round' as const,
   'aria-hidden': true,
 };
+
+const MIME_SIDEBAR_CHAT = 'application/x-memory-canvas-sidebar-chat';
 
 function FolderIcon() {
   return (
@@ -83,6 +86,7 @@ export function Sidebar({
     'projects',
   );
   const [sidebarMenu, setSidebarMenu] = useState<{ x: number; y: number } | null>(null);
+  const [dragOverProjectId, setDragOverProjectId] = useState<ID | 'default' | null>(null);
   const sidebarMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -132,6 +136,20 @@ export function Sidebar({
     const id = createProject('New project');
     setRenamingProjectId(id);
     setDraft('New project');
+  }
+
+  async function moveChatToProject(conversationId: ID, projectId: ID | null) {
+    const current = useStore
+      .getState()
+      .conversations.find((c) => c.id === conversationId);
+    if ((current?.projectId ?? null) === projectId) return;
+
+    try {
+      await moveConversationProjectFiles(conversationId, projectId);
+    } catch (err) {
+      console.warn('failed to move conversation files', err);
+    }
+    setConversationProject(conversationId, projectId);
   }
 
   function commitChatRename(id: ID) {
@@ -323,7 +341,13 @@ export function Sidebar({
               }
             }}
             projects={projects}
-            onChatMoveTo={(cid, pid) => setConversationProject(cid, pid)}
+            onChatMoveTo={moveChatToProject}
+            dragOver={dragOverProjectId === 'default'}
+            onChatDrop={(id) => void moveChatToProject(id, null)}
+            onDragOverProject={() => setDragOverProjectId('default')}
+            onDragLeaveProject={() =>
+              setDragOverProjectId((cur) => (cur === 'default' ? null : cur))
+            }
           />
           {projects.map((p) => (
               <ProjectRow
@@ -391,9 +415,15 @@ export function Sidebar({
                     removeConversation(c.id);
                   }
                 }}
-                onChatMoveOut={(id) => setConversationProject(id, null)}
+                onChatMoveOut={(id) => void moveChatToProject(id, null)}
                 projects={projects}
-                onChatMoveTo={(cid, pid) => setConversationProject(cid, pid)}
+                onChatMoveTo={moveChatToProject}
+                dragOver={dragOverProjectId === p.id}
+                onChatDrop={(id) => void moveChatToProject(id, p.id)}
+                onDragOverProject={() => setDragOverProjectId(p.id)}
+                onDragLeaveProject={() =>
+                  setDragOverProjectId((cur) => (cur === p.id ? null : cur))
+                }
               />
             ))}
         </div>
@@ -478,6 +508,10 @@ function DefaultProjectRow({
   onChatDelete,
   projects,
   onChatMoveTo,
+  dragOver,
+  onChatDrop,
+  onDragOverProject,
+  onDragLeaveProject,
 }: {
   expanded: boolean;
   onToggle: () => void;
@@ -494,9 +528,35 @@ function DefaultProjectRow({
   onChatDelete: (c: Conversation) => void;
   projects: Project[];
   onChatMoveTo: (conversationId: ID, projectId: ID | null) => void;
+  dragOver: boolean;
+  onChatDrop: (conversationId: ID) => void;
+  onDragOverProject: () => void;
+  onDragLeaveProject: () => void;
 }) {
+  function onProjectDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes(MIME_SIDEBAR_CHAT)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    onDragOverProject();
+  }
+
+  function onProjectDrop(e: DragEvent<HTMLDivElement>) {
+    const conversationId = e.dataTransfer.getData(MIME_SIDEBAR_CHAT);
+    if (!conversationId) return;
+    e.preventDefault();
+    onDragLeaveProject();
+    onChatDrop(conversationId);
+  }
+
   return (
-    <div className={`sidebar-project sidebar-project-default${expanded ? ' expanded' : ''}`}>
+    <div
+      className={`sidebar-project sidebar-project-default${expanded ? ' expanded' : ''}${
+        dragOver ? ' drop-target' : ''
+      }`}
+      onDragOver={onProjectDragOver}
+      onDragLeave={onDragLeaveProject}
+      onDrop={onProjectDrop}
+    >
       <div className="sidebar-project-header">
         <button
           type="button"
@@ -545,6 +605,11 @@ function DefaultProjectRow({
                 onDelete={() => onChatDelete(c)}
                 projects={projects}
                 onMoveTo={(pid) => onChatMoveTo(c.id, pid)}
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData(MIME_SIDEBAR_CHAT, c.id);
+                  e.dataTransfer.setData('text/plain', c.title);
+                }}
               />
             ))
           )}
@@ -579,6 +644,10 @@ function ProjectRow({
   onChatMoveOut,
   projects,
   onChatMoveTo,
+  dragOver,
+  onChatDrop,
+  onDragOverProject,
+  onDragLeaveProject,
 }: {
   project: Project;
   expanded: boolean;
@@ -604,6 +673,10 @@ function ProjectRow({
   onChatMoveOut: (id: ID) => void;
   projects: Project[];
   onChatMoveTo: (conversationId: ID, projectId: ID | null) => void;
+  dragOver: boolean;
+  onChatDrop: (conversationId: ID) => void;
+  onDragOverProject: () => void;
+  onDragLeaveProject: () => void;
 }) {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -614,10 +687,30 @@ function ProjectRow({
     setCtxMenu({ x: e.clientX, y: e.clientY });
   }
 
+  function onProjectDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes(MIME_SIDEBAR_CHAT)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    onDragOverProject();
+  }
+
+  function onProjectDrop(e: DragEvent<HTMLDivElement>) {
+    const conversationId = e.dataTransfer.getData(MIME_SIDEBAR_CHAT);
+    if (!conversationId) return;
+    e.preventDefault();
+    onDragLeaveProject();
+    onChatDrop(conversationId);
+  }
+
   return (
     <div
-      className={`sidebar-project${expanded ? ' expanded' : ''}`}
+      className={`sidebar-project${expanded ? ' expanded' : ''}${
+        dragOver ? ' drop-target' : ''
+      }`}
       onContextMenu={onHeaderContextMenu}
+      onDragOver={onProjectDragOver}
+      onDragLeave={onDragLeaveProject}
+      onDrop={onProjectDrop}
     >
       <div className="sidebar-project-header">
         <button
@@ -718,6 +811,11 @@ function ProjectRow({
                   if (pid === null) onChatMoveOut(c.id);
                   else onChatMoveTo(c.id, pid);
                 }}
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData(MIME_SIDEBAR_CHAT, c.id);
+                  e.dataTransfer.setData('text/plain', c.title);
+                }}
                 inProject
               />
             ))
@@ -742,6 +840,7 @@ function ChatRow({
   projects,
   onMoveTo,
   inProject,
+  onDragStart,
 }: {
   conversation: Conversation;
   active: boolean;
@@ -756,6 +855,7 @@ function ChatRow({
   projects: Project[];
   onMoveTo: (projectId: ID | null) => void;
   inProject?: boolean;
+  onDragStart: (e: DragEvent<HTMLDivElement>) => void;
 }) {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -774,6 +874,18 @@ function ChatRow({
         inProject ? ' nested' : ''
       }`}
       onContextMenu={onRowContextMenu}
+      draggable={!renaming}
+      onDragStart={(e) => {
+        if (renaming) {
+          e.preventDefault();
+          return;
+        }
+        onDragStart(e);
+        e.currentTarget.classList.add('dragging');
+      }}
+      onDragEnd={(e) => {
+        e.currentTarget.classList.remove('dragging');
+      }}
     >
       {renaming ? (
         <input
@@ -924,4 +1036,3 @@ function SidebarRowContextMenu({
     </div>
   );
 }
-

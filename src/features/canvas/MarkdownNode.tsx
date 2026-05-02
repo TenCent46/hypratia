@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { WheelEvent } from 'react';
 import {
   NodeResizer,
@@ -7,6 +7,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import { MarkdownRenderer } from '../../services/markdown/MarkdownRenderer';
+import { MarkdownEditor } from '../editor/MarkdownEditor';
 import { NodeHandles } from './NodeHandles';
 import { useStore } from '../../store';
 import type { CanvasSelectionMarker } from '../../types';
@@ -84,10 +85,12 @@ function MarkdownNodeImpl({
   const accent =
     typeof data.hue === 'number' ? `hsl(${data.hue}, 35%, 70%)` : undefined;
   const updateNode = useStore((s) => s.updateNode);
+  const removeNode = useStore((s) => s.removeNode);
   const editing = useStore((s) => s.ui.editingNodeId === id);
   const setEditingNode = useStore((s) => s.setEditingNode);
   const [draft, setDraft] = useState(data.contentMarkdown);
   const cancelBlurSaveRef = useRef(false);
+  const editorWrapperRef = useRef<HTMLDivElement>(null);
   const markers = data.markers ?? [];
   const flow = useReactFlow();
 
@@ -120,6 +123,16 @@ function MarkdownNodeImpl({
   );
 
   async function saveDraft(nextMarkdown = draft) {
+    // Discard fresh-and-empty nodes. A right-click "Add Node" creates an empty
+    // markdown node and immediately enters edit mode; if the user commits
+    // without typing anything (and there was nothing to start with), we drop
+    // the placeholder rather than littering the canvas.
+    if (!nextMarkdown.trim() && !data.contentMarkdown.trim() && !data.title.trim()) {
+      cancelBlurSaveRef.current = true;
+      setEditingNode(null);
+      removeNode(id);
+      return;
+    }
     const rootPath = await resolveMarkdownRoot(useStore.getState().settings.markdownStorageDir);
     const path = await ensureNodeMarkdownPath(rootPath, id);
     if (path && !isMirrorManagedPath(path)) {
@@ -154,7 +167,35 @@ function MarkdownNodeImpl({
     cancelBlurSaveRef.current = true;
     setDraft(data.contentMarkdown);
     setEditingNode(null);
+    if (!data.contentMarkdown.trim() && !data.title.trim()) {
+      removeNode(id);
+    }
   }
+
+  // Close-on-outside-click for the inline rich editor. Capture-phase pointerdown
+  // so we react before React Flow's marquee selection handler runs. We commit
+  // the draft (saveDraft) rather than discarding — matches the previous textarea
+  // blur-save semantics.
+  useEffect(() => {
+    if (!editing) return;
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as globalThis.Node | null;
+      if (!target) return;
+      if (editorWrapperRef.current?.contains(target)) return;
+      if (cancelBlurSaveRef.current) {
+        cancelBlurSaveRef.current = false;
+        return;
+      }
+      void saveDraft();
+    }
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+    // saveDraft closes over `draft`; intentionally re-bound when draft changes
+    // so the latest text is what we persist.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, draft]);
 
   return (
     <>
@@ -182,32 +223,22 @@ function MarkdownNodeImpl({
           {data.title ? <div className="title">{data.title}</div> : <span />}
         </div>
         {editing ? (
-          <textarea
-            className="markdown-node-editor nodrag nowheel"
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+          <div
+            ref={editorWrapperRef}
+            className="markdown-node-editor-wrapper nodrag nowheel"
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             onWheel={bodyWheel}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault();
-                void saveDraft();
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                cancelEdit();
-              }
-            }}
-            onBlur={() => {
-              if (cancelBlurSaveRef.current) {
-                cancelBlurSaveRef.current = false;
-                return;
-              }
-              void saveDraft();
-            }}
-          />
+          >
+            <MarkdownEditor
+              value={draft}
+              onChange={setDraft}
+              onSubmit={() => void saveDraft()}
+              onCancel={cancelEdit}
+              compact
+              autoFocus
+            />
+          </div>
         ) : (
           <div
             className="content markdown-node-body nodrag nowheel"

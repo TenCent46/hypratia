@@ -25,6 +25,7 @@ export type CanvasPanelContextMenuProps = {
   onShowChat?: () => void;
   onHideChat?: () => void;
   onAddNode: () => void;
+  onPaste: () => void;
   onResetView: () => void;
   onFitView: () => void;
   onFitToCanvas: () => void;
@@ -47,6 +48,7 @@ export function CanvasPanelContextMenu({
   onShowChat,
   onHideChat,
   onAddNode,
+  onPaste,
   onResetView,
   onFitView,
   onFitToCanvas,
@@ -95,6 +97,15 @@ export function CanvasPanelContextMenu({
           onClose();
         }}
         label="Add Node"
+        disabled={!canAddNode}
+      />
+      <Item
+        onClick={() => {
+          onPaste();
+          onClose();
+        }}
+        label="Paste"
+        shortcut="⌘V"
         disabled={!canAddNode}
       />
       <Separator />

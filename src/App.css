@@ -425,6 +425,12 @@ input::placeholder {
 .sidebar-project {
   display: flex;
   flex-direction: column;
+  border-radius: 6px;
+}
+.sidebar-project.drop-target {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 .sidebar-project-header {
   display: flex;
@@ -521,6 +527,9 @@ input::placeholder {
   align-items: center;
   border-radius: 6px;
   position: relative;
+}
+.sidebar-chat.dragging {
+  opacity: 0.55;
 }
 .sidebar-chat:hover {
   background: var(--bg-soft);
@@ -4687,6 +4696,56 @@ input::placeholder {
   color: var(--text-mute);
   font-size: 11px;
   background: var(--bg-soft);
+}
+
+/* Compact variant — used for inline editing inside a canvas markdown node.
+   The node container provides the bounding box; the editor stretches to
+   fill it instead of imposing its own min-heights. */
+.markdown-editor.compact {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-radius: 6px;
+  background: var(--bg);
+}
+.markdown-editor.compact .markdown-editor-toolbar {
+  padding: 4px 6px;
+}
+.markdown-editor.compact .markdown-editor-toolbar button {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+.markdown-editor.compact .markdown-editor-body {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.markdown-editor.compact textarea {
+  min-height: 0;
+  height: 100%;
+  resize: none;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.markdown-editor.compact .markdown-editor-preview {
+  min-height: 0;
+  height: 100%;
+  padding: 10px 12px;
+  overflow: auto;
+}
+.markdown-editor.compact .markdown-editor-status {
+  padding: 3px 8px;
+  font-size: 10px;
+}
+.markdown-node-editor-wrapper {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .inspector-advanced {
   border-top: 1px solid var(--border);

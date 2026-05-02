@@ -232,6 +232,7 @@ type State = {
   undoCanvasDelete: () => boolean;
 
   addAttachment: (att: Attachment) => void;
+  updateAttachment: (id: ID, patch: Partial<Omit<Attachment, 'id'>>) => void;
   removeAttachment: (id: ID) => void;
 
   setViewport: (conversationId: ID, viewport: Viewport) => void;
@@ -1011,6 +1012,13 @@ export const useStore = create<State>()(
 
     addAttachment: (att) =>
       set((s) => ({ attachments: [...s.attachments, att] })),
+
+    updateAttachment: (id, patch) =>
+      set((s) => ({
+        attachments: s.attachments.map((a) =>
+          a.id === id ? { ...a, ...patch } : a,
+        ),
+      })),
 
     removeAttachment: (id) =>
       set((s) => ({ attachments: s.attachments.filter((a) => a.id !== id) })),

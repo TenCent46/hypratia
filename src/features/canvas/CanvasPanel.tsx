@@ -48,7 +48,7 @@ import {
   readMessageDragPayload,
   resolveCrossWindowDragPayload,
 } from './dnd';
-import { ingestDroppedFiles } from './ingest';
+import { ingestDroppedFiles, pasteToCanvas } from './ingest';
 import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
 import {
   findFreeNodePosition,
@@ -788,6 +788,16 @@ export function CanvasPanel({
     setEditingNode(node.id);
   }
 
+  // Async paste — used by the right-click "Paste" menu where there is no
+  // ClipboardEvent. Reads navigator.clipboard.read(); falls back to readText.
+  async function pasteAt(screenX: number, screenY: number) {
+    if (showGlobal) return;
+    const targetConv = conversationId ?? ensureConversation();
+    if (!targetConv) return;
+    const position = flow.screenToFlowPosition({ x: screenX, y: screenY });
+    await pasteToCanvas({ kind: 'async' }, targetConv, position);
+  }
+
   function getSelectionOffsets(container: HTMLElement, range: Range) {
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     let offset = 0;
@@ -1180,6 +1190,42 @@ export function CanvasPanel({
     return () => window.removeEventListener('mc:focus-canvas-node', onFocusCanvasNode);
   }, [flow]);
 
+  // Cmd/Ctrl+V on the canvas → drop clipboard contents as new node(s). We
+  // listen at document level (paste only fires on document.body when no
+  // editable element is focused) and skip when the user is in any input,
+  // textarea, or contenteditable so existing native paste handlers (chat
+  // input, node editor textarea) keep working unchanged.
+  useEffect(() => {
+    function onDocPaste(e: ClipboardEvent) {
+      if (showGlobal) return;
+      if (!conversationId) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === 'INPUT' ||
+          t.tagName === 'TEXTAREA' ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      const data = e.clipboardData;
+      if (!data) return;
+      // Paste at the visible canvas center. We resolve via the React Flow
+      // container's bounding rect instead of viewport math so multi-pane
+      // layouts (chat panel taking width) get the correct on-screen center.
+      const container = document.querySelector('.react-flow') as HTMLElement | null;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const screenX = rect.left + rect.width / 2;
+      const screenY = rect.top + rect.height / 2;
+      const position = flow.screenToFlowPosition({ x: screenX, y: screenY });
+      e.preventDefault();
+      void pasteToCanvas({ kind: 'event', data }, conversationId, position);
+    }
+    document.addEventListener('paste', onDocPaste);
+    return () => document.removeEventListener('paste', onDocPaste);
+  }, [conversationId, showGlobal, flow]);
+
   // Theme/project-root double-click → bulk select the connected component:
   // the root itself, every node reachable through incident edges, every
   // node whose `themeId` points at the root (legacy / non-edge clusters),
@@ -1454,6 +1500,7 @@ export function CanvasPanel({
           onShowChat={onShowChat}
           onHideChat={onHideChat}
           onAddNode={() => addNodeAt(paneMenu.x, paneMenu.y)}
+          onPaste={() => void pasteAt(paneMenu.x, paneMenu.y)}
           onResetView={resetCanvasView}
           onFitView={fitCanvasView}
           onFitToCanvas={fitToCanvasEdges}
