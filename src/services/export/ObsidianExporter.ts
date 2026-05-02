@@ -15,6 +15,11 @@ import type {
 } from '../../types';
 import { safeFilename } from './filenames';
 import { buildMarkdown, readFrontmatterId } from './frontmatter';
+import {
+  absoluteMarkdownPath,
+  resolveMarkdownRoot,
+} from '../storage/MarkdownFileService';
+import { useStore } from '../../store';
 
 export type ExportSnapshot = {
   conversations: Conversation[];
@@ -102,11 +107,36 @@ export class ObsidianExporter {
     await ensureDir(dirMaps);
     await ensureDir(dirAttachments);
 
-    // Copy attachments into vault
+    // Copy attachments into the export vault. Source path resolution
+    // dispatches on `storageRoot`: legacy records still live under
+    // `<appData>/attachments/...`, vault-canonical records live under the
+    // user's Markdown working folder.
     const appData = await appDataDir();
-    const attachmentByFilename = new Map<string, string>(); // appData relPath → vault relPath
+    const markdownRoot = await resolveMarkdownRoot(
+      useStore.getState().settings.markdownStorageDir,
+    );
+    async function resolveAttachmentSource(att: Attachment): Promise<string> {
+      switch (att.storageRoot ?? 'appData') {
+        case 'vault':
+          return absoluteMarkdownPath(markdownRoot, att.relPath);
+        case 'appData':
+          return join(appData, att.relPath);
+        case 'external':
+          throw new Error('external storageRoot not supported during export');
+      }
+    }
+    const attachmentByFilename = new Map<string, string>(); // source relPath → vault relPath
     for (const att of snap.attachments) {
-      const srcPath = await join(appData, att.relPath);
+      let srcPath: string;
+      try {
+        srcPath = await resolveAttachmentSource(att);
+      } catch (err) {
+        summary.skipped.push({
+          path: att.relPath,
+          reason: `attachment source resolution failed: ${String(err)}`,
+        });
+        continue;
+      }
       if (!(await exists(srcPath))) {
         summary.skipped.push({ path: srcPath, reason: 'attachment file missing' });
         continue;

@@ -46,11 +46,12 @@ export function themeNodeDataFromCanvasNode(n: CanvasNode): ThemeNodeData {
   };
 }
 
-function ThemeNodeImpl({ data, selected }: NodeProps<ThemeNodeType>) {
+function ThemeNodeImpl({ id, data, selected }: NodeProps<ThemeNodeType>) {
   const accent =
     typeof data.hue === 'number' ? `hsl(${data.hue}, 35%, 70%)` : undefined;
   const glyph = KIND_GLYPH[data.themeKind];
   const importance = data.importance ?? 0;
+  const isThemeRoot = data.themeKind === 'theme';
 
   function handleClick() {
     // Single-click jumps the chat to the source message. We do NOT
@@ -63,6 +64,20 @@ function ThemeNodeImpl({ data, selected }: NodeProps<ThemeNodeType>) {
           conversationId: data.conversationId,
           messageId: data.messageId,
         },
+      }),
+    );
+  }
+
+  function handleDoubleClick(e: React.MouseEvent) {
+    // Double-clicking a theme root bulk-selects the whole cluster (the
+    // root itself + every ask/insight/decision whose `themeId` points at
+    // it, plus the connecting edges). React Flow would otherwise treat
+    // double-click as a no-op for theme nodes.
+    if (!isThemeRoot) return;
+    e.stopPropagation();
+    window.dispatchEvent(
+      new CustomEvent('mc:select-theme-cluster', {
+        detail: { themeRootId: id },
       }),
     );
   }
@@ -82,7 +97,14 @@ function ThemeNodeImpl({ data, selected }: NodeProps<ThemeNodeType>) {
         }`}
         style={accent ? { borderLeft: `3px solid ${accent}` } : undefined}
         onClick={handleClick}
-        title={data.messageId ? 'Click to jump to chat' : data.title}
+        onDoubleClick={handleDoubleClick}
+        title={
+          isThemeRoot
+            ? `${data.title} — double-click to select the whole cluster`
+            : data.messageId
+              ? 'Click to jump to chat'
+              : data.title
+        }
       >
         <NodeHandles />
         {importance > 0 ? (

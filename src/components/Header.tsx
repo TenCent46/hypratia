@@ -9,7 +9,9 @@ export function Header() {
 
   return (
     <header className="header">
-      <span className="title">{workspaceName?.trim() || 'Memory Canvas'}</span>
+      <span className="title">
+        {workspaceName?.trim() || 'Hypratia'}
+      </span>
       <ConversationSwitcher />
       <ViewModeToggle />
       <span className="header-spacer" />

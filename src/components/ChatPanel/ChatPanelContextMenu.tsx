@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useStore } from '../../store';
 import {
   AppContextMenuItem as Item,
@@ -8,6 +8,7 @@ import {
   PaneMenuSubmenu,
   type PaneMenuControl,
 } from '../PanesContextMenu/PanesContextMenu';
+import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
 
 export type ChatPanelContextMenuProps = {
   x: number;
@@ -29,7 +30,7 @@ export function ChatPanelContextMenu({
   onClose,
 }: ChatPanelContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
+  const pos = useClampedMenuPosition(ref, x, y);
 
   const chatTabsAutoHide = useStore(
     (s) => s.settings.chatTabsAutoHide ?? false,
@@ -48,23 +49,6 @@ export function ChatPanelContextMenu({
   const createProject = useStore((s) => s.createProject);
   const setConversationProject = useStore((s) => s.setConversationProject);
   const lastConversationId = useStore((s) => s.settings.lastConversationId);
-
-  // Reposition to stay on screen.
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const pad = 8;
-    let nx = x;
-    let ny = y;
-    if (nx + rect.width + pad > window.innerWidth) {
-      nx = Math.max(pad, window.innerWidth - rect.width - pad);
-    }
-    if (ny + rect.height + pad > window.innerHeight) {
-      ny = Math.max(pad, window.innerHeight - rect.height - pad);
-    }
-    if (nx !== pos.x || ny !== pos.y) setPos({ x: nx, y: ny });
-  }, [x, y, pos.x, pos.y]);
 
   // Outside click + Escape close.
   useEffect(() => {

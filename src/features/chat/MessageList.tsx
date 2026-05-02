@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from 'react';
 
 /**
  * Global Shift-held listener. The chat-message Shift+drag gesture relies on
@@ -107,6 +114,32 @@ export function MessageList({
     if (stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, totalLen]);
 
+  // Jump-to-latest the moment a new streaming message appears (i.e., the
+  // assistant placeholder is added). This overrides `stickToBottom` for
+  // that one transition: even if the user had scrolled up to read older
+  // messages, when the next answer starts generating we snap to it so
+  // they see the response as it streams. Subsequent text updates use
+  // the regular sticky-bottom logic.
+  const prevStreamingRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const currentlyStreaming = new Set(
+      messages.filter((m) => m.streaming).map((m) => m.id),
+    );
+    let newlyStreaming = false;
+    for (const id of currentlyStreaming) {
+      if (!prevStreamingRef.current.has(id)) {
+        newlyStreaming = true;
+        break;
+      }
+    }
+    prevStreamingRef.current = currentlyStreaming;
+    if (!newlyStreaming) return;
+    const el = ref.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stickToBottom.current = true;
+  }, [messages]);
+
   function onScroll() {
     const el = ref.current;
     if (!el) return;
@@ -136,7 +169,13 @@ export function MessageList({
   );
 }
 
-function MessageRow({
+// `React.memo` here is the single biggest chat performance win. The
+// store mutates `messages` on every streaming chunk (see
+// `appendMessageContent`); without memo, every previous message
+// re-parses its markdown and re-runs highlight.js on every token. With
+// memo + the message-object identity check, only the row whose
+// `message` reference actually changed (= the streaming one) re-renders.
+const MessageRow = memo(function MessageRow({
   message,
   onRegenerate,
   flash,
@@ -146,13 +185,26 @@ function MessageRow({
   flash?: boolean;
 }) {
   const removeMessage = useStore((s) => s.removeMessage);
-  const openAiPalette = useStore((s) => s.openAiPalette);
   const dragEligible = !message.streaming && message.role !== 'system';
   const rowRef = useRef<HTMLDivElement>(null);
-  const [selMenu, setSelMenu] = useState<
+  const [askMenu, setAskMenu] = useState<
     | { x: number; y: number; selectedText: string }
     | null
   >(null);
+
+  // Right-click on a non-empty text selection inside this row → small
+  // menu with "Ask" and "Copy". Ask routes the selection into the
+  // **regular chat composer** (quoted), it does NOT open the AI
+  // palette. Empty selection or right-click outside the row → fall
+  // through to the OS-native menu.
+  function onContextMenu(e: React.MouseEvent<HTMLDivElement>) {
+    const sel = window.getSelection();
+    const text = sel?.toString().trim();
+    if (!text) return;
+    if (!rowRef.current?.contains(sel?.anchorNode ?? null)) return;
+    e.preventDefault();
+    setAskMenu({ x: e.clientX, y: e.clientY, selectedText: text });
+  }
 
   // Drag is initiated from the small grip handle in the message
   // header (`.drag-hint`), not the row itself. Putting `draggable=true`
@@ -190,16 +242,10 @@ function MessageRow({
     endMessageDrag();
   }
 
-  function onContextMenu(e: React.MouseEvent<HTMLDivElement>) {
-    // Right-click with a non-empty text selection inside this row offers
-    // Ask / Copy. With no selection we fall through to the native menu.
-    const sel = window.getSelection();
-    const text = sel?.toString().trim();
-    if (!text) return;
-    if (!rowRef.current?.contains(sel?.anchorNode ?? null)) return;
-    e.preventDefault();
-    setSelMenu({ x: e.clientX, y: e.clientY, selectedText: text });
-  }
+  // Chat rows intentionally have no custom context menu: the OS-native
+  // right-click (Copy / Search-with / Look-up …) is enough, and an extra
+  // floating Ask menu was overlapping the native one. Ask-AI lives in the
+  // markdown editor and the attachment preview instead.
 
   function onCopy() {
     void navigator.clipboard.writeText(message.content);
@@ -371,42 +417,43 @@ function MessageRow({
           </button>
         </div>
       ) : null}
-      {selMenu ? (
-        <ChatSelectionMenu
-          x={selMenu.x}
-          y={selMenu.y}
-          selectedText={selMenu.selectedText}
+      {askMenu ? (
+        <ChatSelectionAskMenu
+          x={askMenu.x}
+          y={askMenu.y}
+          selectedText={askMenu.selectedText}
+          rowRef={rowRef}
           onAsk={() => {
-            openAiPalette(
-              selMenu.selectedText,
-              `chat-message:${message.id}`,
+            // Pre-fill the chat composer with the quoted selection, then
+            // focus it so the user can type their question and hit
+            // Enter — same flow as a normal chat message.
+            window.dispatchEvent(
+              new CustomEvent('mc:chat-prefill', {
+                detail: { quoted: askMenu.selectedText },
+              }),
             );
-            setSelMenu(null);
+            setAskMenu(null);
           }}
-          onCopy={() => {
-            void navigator.clipboard.writeText(selMenu.selectedText);
-            setSelMenu(null);
-          }}
-          onClose={() => setSelMenu(null)}
+          onClose={() => setAskMenu(null)}
         />
       ) : null}
     </div>
   );
-}
+});
 
-function ChatSelectionMenu({
+function ChatSelectionAskMenu({
   x,
   y,
   selectedText,
+  rowRef,
   onAsk,
-  onCopy,
   onClose,
 }: {
   x: number;
   y: number;
   selectedText: string;
+  rowRef: React.RefObject<HTMLDivElement | null>;
   onAsk: () => void;
-  onCopy: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -429,6 +476,35 @@ function ChatSelectionMenu({
     selectedText.length > 60
       ? `${selectedText.slice(0, 60)}…`
       : selectedText;
+  const queryPreview = preview.replace(/\s+/g, ' ');
+
+  function copySelection() {
+    void navigator.clipboard.writeText(selectedText);
+    onClose();
+  }
+
+  function selectAllInRow() {
+    const row = rowRef.current;
+    if (!row) {
+      onClose();
+      return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(row);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    onClose();
+  }
+
+  function searchWeb() {
+    const url = `https://www.google.com/search?q=${encodeURIComponent(selectedText)}`;
+    // `window.open` works in the Tauri webview and routes through the
+    // OS opener for `https:` URLs.
+    window.open(url, '_blank');
+    onClose();
+  }
+
   return (
     <div
       ref={ref}
@@ -441,10 +517,36 @@ function ChatSelectionMenu({
         “{preview}”
       </div>
       <button type="button" className="app-context-menu-item" onClick={onAsk}>
-        Ask
+        <span className="app-context-menu-label">Ask…</span>
+        <span className="app-context-menu-shortcut">⏎</span>
       </button>
-      <button type="button" className="app-context-menu-item" onClick={onCopy}>
-        Copy
+      <div className="app-context-menu-sep" role="separator" />
+      <button
+        type="button"
+        className="app-context-menu-item"
+        onClick={copySelection}
+      >
+        <span className="app-context-menu-label">Copy</span>
+        <span className="app-context-menu-shortcut">⌘C</span>
+      </button>
+      <button
+        type="button"
+        className="app-context-menu-item"
+        onClick={selectAllInRow}
+      >
+        <span className="app-context-menu-label">Select Message</span>
+        <span className="app-context-menu-shortcut">⌘A</span>
+      </button>
+      <div className="app-context-menu-sep" role="separator" />
+      <button
+        type="button"
+        className="app-context-menu-item"
+        onClick={searchWeb}
+        title={`Search the web for "${selectedText}"`}
+      >
+        <span className="app-context-menu-label">
+          Search the Web for “{queryPreview}”
+        </span>
       </button>
     </div>
   );

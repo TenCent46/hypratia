@@ -56,8 +56,8 @@ jobs:
       - name: Archive app bundle
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          APP_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Memory Canvas.app"
-          OUT="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Memory-Canvas-${VERSION}-aarch64.app.zip"
+          APP_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Hypratia.app"
+          OUT="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Hypratia-${VERSION}-aarch64.app.zip"
           ditto -c -k --keepParent "$APP_DIR" "$OUT"
 
       - name: Upload release artifacts

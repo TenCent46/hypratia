@@ -5,6 +5,11 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import { preprocessMarkdown, safeForStreaming } from './preprocess';
+import {
+  parseCitationHref,
+  parseCitationText,
+  rehypeKnowledgeCitations,
+} from './citations';
 import { useStore } from '../../store';
 import type { CanvasSelectionMarker } from '../../types';
 import 'katex/dist/katex.min.css';
@@ -270,6 +275,107 @@ function SelectionMark({
   );
 }
 
+function CitationLink({
+  href,
+  parsed,
+  children,
+}: {
+  href: string;
+  parsed: ReturnType<typeof parseCitationHref>;
+  children?: ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      className="kb-citation"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!parsed) {
+          console.warn('[mc:cite] click ignored — href could not be parsed', href);
+          return;
+        }
+        console.info('[mc:cite] citation clicked', parsed);
+        // App.tsx listens for this event, resolves the filename to a
+        // sourcePath via processed/documents.json, and opens the file
+        // preview tab (with pageStart for PDFs).
+        window.dispatchEvent(
+          new CustomEvent('mc:open-knowledge-citation', {
+            detail: parsed,
+          }),
+        );
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+function localLinkTarget(href: string): string {
+  return decodeURIComponent(href)
+    .replace(/^file:\/\//i, '')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '')
+    .trim();
+}
+
+function isMarkdownHref(href: string): boolean {
+  return /\.(md|markdown)(?:#.*)?$/i.test(href);
+}
+
+function LocalFileLink({
+  href,
+  children,
+}: {
+  href: string;
+  children?: ReactNode;
+}) {
+  const label = extractText(children);
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const citation = parseCitationText(label);
+        if (citation) {
+          window.dispatchEvent(
+            new CustomEvent('mc:open-knowledge-citation', {
+              detail: citation,
+            }),
+          );
+          return;
+        }
+        const target = localLinkTarget(href);
+        if (!target) return;
+        if (isMarkdownHref(target)) {
+          window.dispatchEvent(
+            new CustomEvent('mc:open-markdown-file', {
+              detail: { path: target.split('#')[0] },
+            }),
+          );
+          return;
+        }
+        if (!target.includes('/')) {
+          window.dispatchEvent(
+            new CustomEvent('mc:open-knowledge-citation', {
+              detail: { filename: target },
+            }),
+          );
+          return;
+        }
+        window.dispatchEvent(
+          new CustomEvent('mc:open-knowledge-file-preview', {
+            detail: { path: target },
+          }),
+        );
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 function MarkdownRendererImpl({
   markdown,
   streaming,
@@ -285,17 +391,35 @@ function MarkdownRendererImpl({
    */
   onSaveCodeBlock?: (code: string, language?: string) => void;
 }) {
-  const text = preprocessMarkdown(streaming ? safeForStreaming(markdown) : markdown);
+  // Memoise the preprocessed text. `preprocessMarkdown` does several
+  // regex passes that are wasted work whenever the parent re-renders
+  // for an unrelated reason.
+  const text = useMemo(
+    () =>
+      preprocessMarkdown(streaming ? safeForStreaming(markdown) : markdown),
+    [markdown, streaming],
+  );
+  // While a message is streaming, skip the heavyweight plugins:
+  // `rehypeHighlight` (highlight.js tokenisation) and `rehypeKatex` both
+  // walk the full HAST tree on every chunk; that's the dominant cost
+  // when chunks arrive 30-60 times a second. The final render after
+  // `streaming: false` re-applies them so finished messages still have
+  // syntax-highlighted code blocks and rendered math.
   const rehypePlugins = useMemo(() => {
-    const plugins: Parameters<typeof ReactMarkdown>[0]['rehypePlugins'] = [
-      rehypeKatex,
-      rehypeHighlight,
-    ];
+    const plugins: Parameters<typeof ReactMarkdown>[0]['rehypePlugins'] = [];
+    if (!streaming) {
+      plugins.push(rehypeKatex);
+      plugins.push(rehypeHighlight);
+    }
     if (markers && markers.length > 0) {
       plugins.push(rehypeSelectionMarkers(markers));
     }
+    // Always rewrite knowledge_search citations into clickable links so a
+    // chat reply that quotes `[file.pdf, p. 5]` jumps straight to that
+    // page in the file preview. Cheap O(text-length) scan.
+    plugins.push(rehypeKnowledgeCitations);
     return plugins;
-  }, [markers]);
+  }, [markers, streaming]);
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
@@ -339,7 +463,24 @@ function MarkdownRendererImpl({
             const id = decodeURIComponent(href.slice('mc:transclude/'.length));
             return <Transclusion id={id} />;
           }
+          if (href && href.startsWith('mc:cite/')) {
+            const parsed = parseCitationHref(href);
+            if (parsed) {
+              return (
+                <CitationLink href={href} parsed={parsed}>
+                  {children}
+                </CitationLink>
+              );
+            }
+          }
           const isExternal = !!href && /^https?:\/\//.test(href);
+          const isSpecial =
+            !href ||
+            href.startsWith('#') ||
+            /^(mailto:|tel:)/i.test(href);
+          if (!isExternal && !isSpecial) {
+            return <LocalFileLink href={href}>{children}</LocalFileLink>;
+          }
           return (
             <a
               href={href}

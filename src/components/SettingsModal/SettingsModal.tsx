@@ -846,7 +846,7 @@ function AppearanceTab() {
             const next = e.target.value;
             setWorkspaceName(next.trim() ? next : undefined);
           }}
-          placeholder="Memory Canvas"
+          placeholder="Hypratia"
         />
       </label>
 
@@ -1338,25 +1338,45 @@ function WorkflowTab() {
 function AboutTab() {
   return (
     <section className="settings-section">
-      <h3>Memory Canvas</h3>
+      <h3>Hypratia</h3>
       <p className="muted">
-        A local-first AI thinking workspace. Bring your own API keys. Your data
-        stays on your machine.
+        A local-first AI thinking workspace for conversations, documents, and
+        spatial memory. Bring your own API keys; your workspace stays on your
+        machine.
       </p>
       <ul className="about-list">
         <li>Version: 1.1.0-beta.1</li>
-        <li>License: TBD</li>
+        <li>License: MIT</li>
+        <li>Platform: macOS first, Tauri native desktop shell</li>
+        <li>AI providers: OpenAI, Anthropic, Google, Mistral, and compatible APIs</li>
         <li>
           <strong>No telemetry.</strong> The app does not phone home.
         </li>
       </ul>
 
+      <h3 style={{ marginTop: 20 }}>What it is</h3>
+      <p className="muted">
+        Hypratia combines a streaming AI chat, an infinite canvas, a Markdown
+        knowledge workspace, and an in-app PDF/document viewer. It is designed
+        for keeping source material, generated notes, citations, and follow-up
+        thinking in one local workspace.
+      </p>
+
+      <h3 style={{ marginTop: 20 }}>What it can do</h3>
+      <ul className="about-list">
+        <li>Chat with AI using your own provider keys.</li>
+        <li>Turn useful messages and document excerpts into canvas nodes.</li>
+        <li>Open Markdown, PDF, CSV, DOCX, and other project files from the file viewer.</li>
+        <li>Use project folders with raw documents, instructions, memory, and processed indexes.</li>
+        <li>Export conversations and notes as Markdown for Obsidian-style workflows.</li>
+      </ul>
+
       <h3 style={{ marginTop: 20 }}>Privacy</h3>
       <p className="muted">
-        The only network calls Memory Canvas makes are: (1) you, talking to the
-        AI provider whose key you configured; (2) update checks against the
-        public GitHub release endpoint, anonymous. We do not track content,
-        events, or identifiers.
+        The only network calls Hypratia makes are: (1) you, talking to the AI
+        provider whose key you configured; (2) update checks against the public
+        GitHub release endpoint, anonymous. We do not track content, events, or
+        identifiers.
       </p>
 
       <h3 style={{ marginTop: 20 }}>Where your data lives</h3>

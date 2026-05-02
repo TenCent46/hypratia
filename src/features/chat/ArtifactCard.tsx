@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store';
 import { attachments as attachmentService } from '../../services/attachments';
 import { dialog } from '../../services/dialog';
-import type { Attachment, ID } from '../../types';
+import type { Attachment, CanvasNodeKind, ID } from '../../types';
 
 type Props = {
   attachmentId: ID;
@@ -58,6 +58,7 @@ export function ArtifactCard({ attachmentId, conversationId }: Props) {
   );
   const addNode = useStore((s) => s.addNode);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const ext = useMemo(
     () => att?.filename.split('.').pop()?.toLowerCase() ?? '',
@@ -86,30 +87,60 @@ export function ArtifactCard({ attachmentId, conversationId }: Props) {
 
   if (!att) return null;
 
-  async function onOpen() {
+  function onOpen() {
     if (!att) return;
+    setActionError(null);
+    // Route to the in-app workspace preview instead of the OS default
+    // app. The preview pane already renders PDF / image / CSV / docx /
+    // pptx / text inline; markdown attachments display the source.
+    window.dispatchEvent(
+      new CustomEvent('mc:open-attachment-preview', {
+        detail: { attachmentId: att.id, title: att.filename },
+      }),
+    );
+  }
+
+  async function onOpenExternal() {
+    if (!att) return;
+    setActionError(null);
     try {
       const path = await attachmentService.resolveAbsolutePath(att);
       await dialog.openWithSystem(path);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setActionError(`Open externally failed: ${message}`);
+      console.error('open attachment externally failed', err);
     }
   }
 
   async function onReveal() {
     if (!att) return;
+    setActionError(null);
     try {
       const path = await attachmentService.resolveAbsolutePath(att);
       await dialog.revealInFinder(path);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setActionError(`Reveal failed: ${message}`);
+      console.error('reveal attachment failed', err);
     }
   }
 
   function onAddToCanvas() {
     if (!att) return;
+    // Tag the node with a `kind` matching the attachment so the canvas
+    // renderer routes it to the right component (ImageNode / PdfNode /
+    // ArtifactNode). Without `kind` the node would fall through to the
+    // markdown default and the file viewer would never open on click.
+    const kind: CanvasNodeKind =
+      att.kind === 'image'
+        ? 'image'
+        : att.kind === 'pdf' || ext === 'pdf'
+          ? 'pdf'
+          : 'artifact';
     addNode({
       conversationId,
+      kind,
       title: att.filename,
       contentMarkdown: `**${att.filename}** · ${formatBytes(att.bytes)}`,
       position: { x: 240, y: 240 },
@@ -129,7 +160,7 @@ export function ArtifactCard({ attachmentId, conversationId }: Props) {
             type="button"
             className="artifact-card-name"
             onClick={onOpen}
-            title="Open with default app"
+            title="Open in preview"
           >
             {att.filename}
           </button>
@@ -140,8 +171,15 @@ export function ArtifactCard({ attachmentId, conversationId }: Props) {
           </div>
         </div>
         <div className="artifact-card-actions">
-          <button type="button" onClick={onOpen} title="Open">
+          <button type="button" onClick={onOpen} title="Open in preview">
             Open
+          </button>
+          <button
+            type="button"
+            onClick={onOpenExternal}
+            title="Open with default app"
+          >
+            Open externally
           </button>
           <button type="button" onClick={onReveal} title="Reveal in Finder">
             Reveal
@@ -159,6 +197,7 @@ export function ArtifactCard({ attachmentId, conversationId }: Props) {
           <small>AI-generated audio</small>
         </div>
       ) : null}
+      {actionError ? <div className="result error">{actionError}</div> : null}
       {att.kind === 'video' ? (
         <div className="artifact-card-video">
           <small>AI-generated video — open to play.</small>

@@ -7,23 +7,29 @@ import {
   type MarkdownTreeNode,
 } from '../../services/storage/MarkdownFileService';
 import { searchMarkdownFiles, type MarkdownSearchResult } from '../../services/markdown/MarkdownSearchService';
-import { isMirroredFile } from '../../services/knowledge/conversationMarkdownMirror';
+import {
+  isMirroredFile,
+  repairOrphanedMirrorFiles,
+} from '../../services/knowledge/conversationMarkdownMirror';
 import { dialog } from '../../services/dialog';
 import { validateMarkdownStorageDir } from '../../services/export/markdownStorage';
+import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
 
 type MenuTarget =
   | { node: MarkdownTreeNode; x: number; y: number }
   | { node: null; x: number; y: number };
 
 // Mirror confirmation cheat: only files matching this pattern under the
-// current chat-history layout (or the legacy Chats/Projects layout) are
-// candidates for the chat badge. We then confirm by reading frontmatter and
-// checking `source: internal-chat`. The pattern check keeps the scan bounded.
+// current canvas layout (or the legacy chat-history / Chats / Projects
+// layouts) are candidates for the chat badge. We then confirm by reading
+// frontmatter and checking `source: internal-chat`. The pattern check keeps
+// the scan bounded.
 const MIRROR_FILENAME_PATTERN = /--[A-Za-z0-9_-]{6,}\.md$/i;
 function isMirrorCandidate(node: MarkdownTreeNode): boolean {
   if (node.kind !== 'file') return false;
   if (!MIRROR_FILENAME_PATTERN.test(node.name)) return false;
   return (
+    node.path.startsWith('default/canvas/') ||
     node.path.startsWith('default/chat-history/') ||
     node.path.startsWith('chat-history/') ||
     node.path.startsWith('projects/') ||
@@ -32,9 +38,65 @@ function isMirrorCandidate(node: MarkdownTreeNode): boolean {
   );
 }
 
+// Hide noise from the file tree to keep the chat-side view simple.
+// `processed/` is a derived index folder used by knowledge retrieval; users
+// never need to see it. `.DS_Store` is a macOS Finder artifact.
+function isHiddenInTree(node: MarkdownTreeNode): boolean {
+  if (node.name === '.DS_Store') return true;
+  if (node.kind === 'folder' && node.name === 'processed') return true;
+  return false;
+}
+
+function pruneHiddenTree(node: MarkdownTreeNode): MarkdownTreeNode {
+  const children = (node.children ?? [])
+    .filter((c) => !isHiddenInTree(c))
+    .map(pruneHiddenTree);
+  return node.children ? { ...node, children } : node;
+}
+
 function obsidianLinkFor(node: MarkdownTreeNode): string {
   const stem = node.name.replace(/\.md$/i, '');
   return `[[${stem}]]`;
+}
+
+function extensionOf(name: string): string {
+  const i = name.lastIndexOf('.');
+  if (i <= 0 || i === name.length - 1) return '';
+  return name.slice(i + 1).toLowerCase();
+}
+
+function isMarkdownFile(node: MarkdownTreeNode): boolean {
+  return node.kind === 'file' && /^(md|markdown)$/i.test(extensionOf(node.name));
+}
+
+function fileIconLabel(node: MarkdownTreeNode): string {
+  if (node.kind === 'folder') return 'dir';
+  return extensionOf(node.name) || 'file';
+}
+
+function openKnowledgeFile(node: MarkdownTreeNode, onOpenMarkdown: (path: string) => void) {
+  if (isMarkdownFile(node)) {
+    onOpenMarkdown(node.path);
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent('mc:open-knowledge-file-preview', {
+      detail: { path: node.path },
+    }),
+  );
+}
+
+function findNodeByPath(
+  node: MarkdownTreeNode | null,
+  path: string,
+): MarkdownTreeNode | null {
+  if (!node) return null;
+  if (node.path === path) return node;
+  for (const child of node.children ?? []) {
+    const found = findNodeByPath(child, path);
+    if (found) return found;
+  }
+  return null;
 }
 
 const ASK_TRUNCATE_BYTES = 64 * 1024;
@@ -67,6 +129,7 @@ export function MarkdownFileExplorer({
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPos = useClampedMenuPosition(menuRef, menu?.x ?? 0, menu?.y ?? 0);
 
   const rootName = useMemo(() => {
     if (!rootPath) return 'Local Markdown';
@@ -79,9 +142,9 @@ export function MarkdownFileExplorer({
     setError(null);
     try {
       const root = await resolveMarkdownRoot(configuredRoot);
-      const nextTree = await markdownFiles.listTree(root);
+      const nextTree = await markdownFiles.listFullTree(root);
       setRootPath(root);
-      setTree(nextTree);
+      setTree(pruneHiddenTree(nextTree));
       setExpanded((cur) => new Set(cur).add(''));
     } catch (err) {
       setError(String(err));
@@ -119,11 +182,29 @@ export function MarkdownFileExplorer({
         written?: number;
         skipped?: number;
         errors?: { conversationId: string; reason: string }[];
+        // The Rebuild project knowledge index command piggybacks on
+        // this event so its result lands in the same toast surface.
+        rebuildStarted?: boolean;
+        rebuildLabel?: string;
+        rebuildSummary?: string;
       }>).detail;
       setSyncing(false);
       if (!detail) return;
       if (detail.error) {
         showToast('error', `Knowledge Base sync failed: ${detail.error}`);
+        return;
+      }
+      if (detail.rebuildStarted) {
+        showToast(
+          'info',
+          `Rebuilding knowledge index for ${detail.rebuildLabel ?? 'project'}…`,
+        );
+        return;
+      }
+      if (detail.rebuildSummary) {
+        const tone: ToastTone =
+          detail.errors && detail.errors.length > 0 ? 'error' : 'info';
+        showToast(tone, detail.rebuildSummary);
         return;
       }
       // Per-item errors used to surface as a noisy red toast on every
@@ -184,6 +265,78 @@ export function MarkdownFileExplorer({
     window.dispatchEvent(new CustomEvent('mc:knowledge-sync-request'));
   }, [showToast]);
 
+  const repairMirror = useCallback(async () => {
+    // Use the native ask dialog via the dialog service. `confirmDangerTwice`
+    // wraps `window.confirm`, which Tauri 2's webview can swallow silently,
+    // leaving the user with a button that does nothing.
+    const first = await dialog.ask(
+      'Deletes any mirror-managed Markdown file (chat history, node mirror, edges) whose frontmatter is missing or stale, then re-syncs.\n\nIn-canvas edits saved into those files will be lost; user-authored notes outside mirror paths are kept.',
+      {
+        title: 'Repair orphaned mirror files?',
+        kind: 'warning',
+        okLabel: 'Continue',
+        cancelLabel: 'Cancel',
+      },
+    );
+    if (!first) return;
+    const second = await dialog.ask(
+      'Second confirmation: permanently delete the orphaned mirror files and resync? This cannot be undone.',
+      {
+        title: 'Repair orphaned mirror files?',
+        kind: 'warning',
+        okLabel: 'Delete & resync',
+        cancelLabel: 'Cancel',
+      },
+    );
+    if (!second) return;
+    try {
+      const state = useStore.getState();
+      const result = await repairOrphanedMirrorFiles({
+        conversations: state.conversations,
+        nodes: state.nodes,
+        projects: state.projects,
+        markdownStorageDir: state.settings.markdownStorageDir,
+      });
+      if (result.errors.length > 0) {
+        console.warn('[mirror-repair] some deletes failed', result.errors);
+      }
+      // Break the re-clobber cycle: clearing mdPath here means the next
+      // in-canvas save mints a fresh non-mirror file for these nodes.
+      if (result.nodeIdsToClearMdPath.length > 0) {
+        const updateNode = useStore.getState().updateNode;
+        for (const nodeId of result.nodeIdsToClearMdPath) {
+          updateNode(nodeId, { mdPath: undefined });
+        }
+      }
+      const parts: string[] = [];
+      if (result.deleted.length > 0) {
+        parts.push(
+          `${result.deleted.length} orphaned file${
+            result.deleted.length === 1 ? '' : 's'
+          }`,
+        );
+      }
+      if (result.nodeIdsToClearMdPath.length > 0) {
+        parts.push(
+          `${result.nodeIdsToClearMdPath.length} node mdPath${
+            result.nodeIdsToClearMdPath.length === 1 ? '' : 's'
+          }`,
+        );
+      }
+      const msg = parts.length
+        ? `Repaired ${parts.join(' + ')}. Resyncing…`
+        : 'Nothing to repair.';
+      showToast('info', msg);
+      await refresh();
+      if (result.deleted.length > 0 || result.nodeIdsToClearMdPath.length > 0) {
+        setSyncing(true);
+        window.dispatchEvent(new CustomEvent('mc:knowledge-sync-request'));
+      }
+    } catch (err) {
+      showToast('error', `Repair failed: ${String(err)}`);
+    }
+  }, [refresh, showToast]);
+
   const chooseWorkingFolder = useCallback(async () => {
     setError(null);
     try {
@@ -195,10 +348,10 @@ export function MarkdownFileExplorer({
         return;
       }
       setLoading(true);
-      const nextTree = await markdownFiles.listTree(picked);
+      const nextTree = await markdownFiles.listFullTree(picked);
       setMarkdownStorageDir(picked);
       setRootPath(picked);
-      setTree(nextTree);
+      setTree(pruneHiddenTree(nextTree));
       setExpanded((cur) => new Set(cur).add(''));
       showToast('info', 'Working folder changed.');
       window.dispatchEvent(new CustomEvent('mc:knowledge-sync-request'));
@@ -240,7 +393,11 @@ export function MarkdownFileExplorer({
           selectedNodeIds: [],
           markdownStorageDir: configuredRoot,
         });
-        if (!cancelled) setContentMatches(results);
+        const filtered = results.filter(
+          (r) =>
+            !r.path.split('/').some((seg) => seg === 'processed' || seg === '.DS_Store'),
+        );
+        if (!cancelled) setContentMatches(filtered);
       } catch (err) {
         if (!cancelled) setError(String(err));
       } finally {
@@ -315,7 +472,7 @@ export function MarkdownFileExplorer({
       const detail =
         node.kind === 'folder'
           ? 'This deletes the folder and all Markdown files inside it.'
-          : 'This deletes the Markdown file from disk.';
+          : 'This deletes the file from disk.';
       if (
         !confirmDangerTwice({
           title: `Delete "${node.name}"?`,
@@ -350,7 +507,7 @@ export function MarkdownFileExplorer({
 
   const openInCanvas = useCallback(
     async (node: MarkdownTreeNode) => {
-      if (!rootPath || node.kind !== 'file') return;
+      if (!rootPath || !isMarkdownFile(node)) return;
       try {
         const content = await markdownFiles.readFile(rootPath, node.path);
         const state = useStore.getState();
@@ -388,7 +545,7 @@ export function MarkdownFileExplorer({
 
   const askWithFile = useCallback(
     async (node: MarkdownTreeNode) => {
-      if (!rootPath || node.kind !== 'file') return;
+      if (!rootPath || !isMarkdownFile(node)) return;
       try {
         let content = await markdownFiles.readFile(rootPath, node.path);
         if (content.length > ASK_TRUNCATE_BYTES) {
@@ -501,6 +658,14 @@ export function MarkdownFileExplorer({
           </button>
           <button
             type="button"
+            onClick={() => void repairMirror()}
+            title="Repair orphaned mirror files (deletes stale mirror-managed files, then resyncs)"
+            aria-label="Repair orphaned mirror files"
+          >
+            🔧
+          </button>
+          <button
+            type="button"
             onClick={() => void reveal(revealTarget)}
             title="Reveal in Finder"
             aria-label="Reveal in Finder"
@@ -525,7 +690,7 @@ export function MarkdownFileExplorer({
       {error ? <div className="knowledge-error">{error}</div> : null}
       <div className="knowledge-tree">
         {loading && !tree ? (
-          <div className="sidebar-empty">Loading Markdown files...</div>
+          <div className="sidebar-empty">Loading files...</div>
         ) : mergedSearchResults ? (
           <div className="knowledge-search-results">
             {mergedSearchResults.length === 0 ? (
@@ -540,7 +705,7 @@ export function MarkdownFileExplorer({
                   }`}
                   onClick={() => {
                     setSelectedPath(node.path);
-                    onOpenFile(node.path);
+                    openKnowledgeFile(node, onOpenFile);
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -578,7 +743,9 @@ export function MarkdownFileExplorer({
             onSelect={setSelectedPath}
             onOpenFile={(path) => {
               setSelectedPath(path);
-              onOpenFile(path);
+              const node = findNodeByPath(tree, path);
+              if (node) openKnowledgeFile(node, onOpenFile);
+              else onOpenFile(path);
             }}
             onContextMenu={(node, x, y) => {
               setSelectedPath(node.path);
@@ -586,7 +753,7 @@ export function MarkdownFileExplorer({
             }}
           />
         ) : (
-          <div className="sidebar-empty">No Markdown folder yet.</div>
+          <div className="sidebar-empty">No Knowledge Base folder yet.</div>
         )}
       </div>
       {toast ? (
@@ -598,7 +765,7 @@ export function MarkdownFileExplorer({
         <div
           ref={menuRef}
           className="knowledge-menu"
-          style={{ left: menu.x, top: menu.y }}
+          style={{ left: menuPos.x, top: menuPos.y }}
         >
           {menuNode?.kind === 'file' ? (
             <>
@@ -606,38 +773,42 @@ export function MarkdownFileExplorer({
                 type="button"
                 onClick={() => {
                   setMenu(null);
-                  onOpenFile(menuNode.path);
+                  openKnowledgeFile(menuNode, onOpenFile);
                 }}
               >
                 Open
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMenu(null);
-                  void openInCanvas(menuNode);
-                }}
-              >
-                Open in Canvas
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMenu(null);
-                  void askWithFile(menuNode);
-                }}
-              >
-                Ask with this file
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMenu(null);
-                  void copyObsidianLink(menuNode);
-                }}
-              >
-                Copy Obsidian Link
-              </button>
+              {isMarkdownFile(menuNode) ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      void openInCanvas(menuNode);
+                    }}
+                  >
+                    Open in Canvas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      void askWithFile(menuNode);
+                    }}
+                  >
+                    Ask with this file
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      void copyObsidianLink(menuNode);
+                    }}
+                  >
+                    Copy Obsidian Link
+                  </button>
+                </>
+              ) : null}
             </>
           ) : null}
           {menuNode?.kind !== 'file' ? (
@@ -748,7 +919,7 @@ function TreeNodeRow({
         onClick={() => {
           onSelect(node.path);
           if (isFolder) onToggle(node.path);
-          else onOpenFile(node.path);
+          else openKnowledgeFile(node, onOpenFile);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -757,7 +928,7 @@ function TreeNodeRow({
         }}
       >
         <span className="knowledge-caret">{isFolder ? (isExpanded ? 'v' : '>') : ''}</span>
-        <span className="knowledge-icon">{isFolder ? 'dir' : 'md'}</span>
+        <span className="knowledge-icon">{fileIconLabel(node)}</span>
         <span className="knowledge-name">
           {node.name}
           {isMirror ? (

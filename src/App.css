@@ -1141,6 +1141,24 @@ input::placeholder {
   container-type: inline-size;
   background: var(--bg);
   color: var(--text);
+  position: relative;
+}
+.attachment-ask-toast {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: var(--shadow-card);
+  z-index: 50;
+}
+.attachment-ask-toast.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
 }
 .attachment-preview-header {
   display: flex;
@@ -1189,7 +1207,7 @@ input::placeholder {
 .attachment-preview-body {
   min-height: 0;
   overflow: auto;
-  padding: 18px;
+  padding: 8px;
 }
 .attachment-preview-empty {
   margin: 28px auto;
@@ -1220,12 +1238,15 @@ input::placeholder {
   line-height: 1.55;
 }
 .attachment-pdf-page {
-  width: max-content;
+  display: flex;
+  width: 100%;
   max-width: 100%;
-  margin: 0 auto 18px;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 0 12px;
 }
 .attachment-pdf-page canvas {
-  max-width: none;
+  max-width: 100%;
   background: white;
   box-shadow: 0 1px 5px rgba(15, 23, 42, 0.16);
 }
@@ -2324,6 +2345,145 @@ input::placeholder {
   font-weight: 600;
   pointer-events: none;
 }
+
+/* ----------------------------------------------------------------- *
+ * Title-only view                                                   *
+ *                                                                   *
+ * When the user picks the "Titles" tab on the Map view toggle the   *
+ * canvas wraps with `.canvas-titles-only`. Each node hides its body *
+ * and bumps its title up. Selection / drag / right-click menus stay *
+ * the same; only the visible body collapses so the user can read    *
+ * a dense canvas at a glance.                                       *
+ * ----------------------------------------------------------------- */
+.canvas-titles-only .markdown-node-body,
+.canvas-titles-only .markdown-node-content,
+.canvas-titles-only .markdown-node-editor,
+.canvas-titles-only .theme-node-summary,
+.canvas-titles-only .theme-node-glyph,
+.canvas-titles-only .theme-node-importance,
+.canvas-titles-only .pdf-node-preview,
+.canvas-titles-only .artifact-node-preview,
+.canvas-titles-only .artifact-node-actions {
+  display: none !important;
+}
+.canvas-titles-only .markdown-node-header > .title,
+.canvas-titles-only .theme-node-title,
+.canvas-titles-only .artifact-node-name,
+.canvas-titles-only .pdf-node-title {
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 700;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  /* The hidden body usually carries the node's height. With it gone
+     the title needs explicit padding so cards don't collapse to a
+     1-line slab that's hard to click. */
+  padding: 14px 16px;
+}
+.canvas-titles-only .markdown-node,
+.canvas-titles-only .theme-node {
+  /* Slightly thicker border so titles read as standalone cards even
+     without surrounding chrome. */
+  border-width: 1.5px;
+}
+
+/* ----------------------------------------------------------------- *
+ * Relationship-tree window (spec 36)                                *
+ *                                                                   *
+ * Read-only second window that renders the active conversation's    *
+ * parent-edge tree as fixed-size title cards laid out by dagre.     *
+ * Visually: a clean dotted background, no drag affordances, just    *
+ * cards + edges. Selection highlight matches the canvas accent.     *
+ * ----------------------------------------------------------------- */
+.tree-window-root {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg);
+  color: var(--text);
+}
+.tree-window-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tree-window-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.tree-window-header-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-mute);
+}
+.tree-window-header-conv {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-window-canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.tree-window-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-mute);
+  font-size: 13px;
+  padding: 24px;
+  text-align: center;
+}
+.tree-window-node {
+  width: 200px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.tree-window-node:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+.tree-window-node.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.tree-window-node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+.tree-window-node-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
 .theme-node-importance {
   position: absolute;
   top: 6px;
@@ -2423,6 +2583,50 @@ input::placeholder {
 }
 .canvas-modal-hint {
   font-size: 13px;
+}
+/* Model row in canvas Ask modals — flush with the header, slightly
+   muted background so it reads as "settings for this Ask" rather
+   than a primary input. */
+.canvas-modal-model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  flex-wrap: wrap;
+}
+/* AI palette mode toggle — sits between the model picker and the
+   selection blockquote. Pill-style buttons; the active mode picks up
+   a small elevation. The "(no web)" suffix is only added when the
+   selected model has no web-search tool, so it reads as a hint, not
+   a disabled state. */
+.ai-palette-modes {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-soft);
+}
+.ai-palette-modes button {
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-mute);
+  cursor: pointer;
+}
+.ai-palette-modes button:hover {
+  color: var(--text);
+}
+.ai-palette-modes button.active {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 .canvas-modal textarea {
   min-height: 150px;
@@ -2776,6 +2980,15 @@ input::placeholder {
 
 .message {
   padding: 12px 0;
+  /* Layout / paint isolation: the streaming row's height grows on every
+     animation frame; without containment that growth re-runs layout
+     across the whole message-list and steals the main thread from the
+     user's scroll. `contain: layout paint` scopes that work to the row,
+     and `content-visibility: auto` lets the browser skip rendering work
+     entirely for off-screen rows in long histories. */
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
 }
 .message + .message {
   border-top: 1px solid var(--border);
@@ -5434,17 +5647,41 @@ input::placeholder {
   --xy-background-color-default: var(--bg);
 }
 
-/* Command palette */
+/* Command palette
+   ──────────────
+   Layout strategy: the palette uses an explicit bounded HEIGHT (not just
+   max-height) and grid rows so the list child gets a known scroll
+   viewport regardless of what cmdk decides to do internally.
+
+   Why grid + height (not flex + max-height): cmdk's `<Command.List>`
+   exposes `--cmdk-list-height` via a ResizeObserver and applies inline
+   `height: var(--cmdk-list-height)` on `[cmdk-list]`. With flex parents
+   and content > 70vh, that inline height grows past our flex track,
+   `overflow-y: auto` never reports a scrollable height, and the browser
+   walks the wheel up to the document. With grid + minmax(0, 1fr) AND
+   `!important` overrides on `[cmdk-list]`, cmdk's inline style is
+   forced down to the row's computed size, so scrollHeight > clientHeight
+   becomes a guaranteed invariant. */
 .cmd-palette {
   background: var(--bg);
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   width: min(620px, 100%);
-  max-height: 70vh;
-  display: flex;
-  flex-direction: column;
+  height: min(70vh, 640px);
   overflow: hidden;
   box-shadow: var(--shadow-modal);
+}
+/* Critical: the grid lives on cmdk's internal `[cmdk-root]` div, NOT on
+   `.cmd-palette`. cmdk wraps Input + List in `[cmdk-root]`, so that's
+   the one direct child of the palette and the only place where a row
+   track allocation actually constrains the list. Putting the grid on
+   `.cmd-palette` only sized `[cmdk-root]` (single child gets row 1),
+   leaving the list inside it free to grow to content height. */
+.cmd-palette [cmdk-root] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
 }
 .cmd-input {
   width: 100%;
@@ -5456,9 +5693,25 @@ input::placeholder {
   background: var(--bg);
   color: var(--text);
 }
-.cmd-list {
-  overflow-y: auto;
+.cmd-list,
+[cmdk-list] {
+  /* `!important` here is required to defeat cmdk's inline
+     `height: var(--cmdk-list-height)`. The list's job is to be a SCROLL
+     VIEWPORT, not to grow with its content. */
+  min-height: 0;
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
   padding: 6px 0;
+}
+/* cmdk's internal sizer is what actually contains the items. It must
+   stay `overflow: visible` so the parent's `overflow-y: auto` is the
+   one place scrolling happens. */
+.cmd-list [cmdk-list-sizer],
+[cmdk-list-sizer] {
+  display: block;
+  overflow: visible;
 }
 .cmd-group {
   padding: 6px 0;
@@ -5747,6 +6000,18 @@ input::placeholder {
 .workspace-config-files li:hover {
   background: var(--bg-soft);
 }
+.workspace-config-file-name {
+  flex: 1;
+  text-align: left;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-config-file-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
 .workspace-config-files .link {
   border: 0;
   background: transparent;
@@ -5754,6 +6019,37 @@ input::placeholder {
   font: inherit;
   cursor: pointer;
   padding: 0;
+}
+/* Knowledge indexing status — subtle but visible badge */
+.kb-status-badge {
+  display: inline-block;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text-mute);
+  white-space: nowrap;
+}
+.kb-status-badge.kb-status-indexed {
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+  color: color-mix(in oklab, var(--accent) 70%, var(--text-mute));
+}
+.kb-status-badge.kb-status-pending {
+  border-style: dashed;
+}
+.kb-status-badge.kb-status-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.kb-status-badge.kb-status-deleted {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+.kb-status-deleted-row {
+  opacity: 0.7;
 }
 .workspace-config-files .link:hover {
   text-decoration: underline;
@@ -5778,6 +6074,32 @@ input::placeholder {
   justify-content: space-between;
   align-items: center;
 }
+.ai-palette-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-palette-debug {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-soft);
+  color: var(--text-mute);
+  cursor: pointer;
+}
+.ai-palette-debug:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.ai-palette-model {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
 .ai-selection {
   font-size: 12px;
 }
@@ -5787,17 +6109,38 @@ input::placeholder {
   margin: 4px 0 0;
   font-style: italic;
   color: var(--text-mute);
+  white-space: pre-wrap;
 }
-.ai-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+/* Collapsed selection — clamp to 2 lines with an ellipsis fade. The
+   blockquote is clickable; the affordance is the cursor + the
+   "Show more" button below it. Native CSS line-clamp keeps this
+   layout-only (no JS measuring required). */
+.ai-selection-quote.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
 }
-.ai-presets button {
-  font-size: 12px;
-  padding: 4px 10px;
+.ai-selection-quote.expanded {
+  cursor: pointer;
+  max-height: 320px;
+  overflow: auto;
 }
-.ai-custom input {
+.ai-selection-toggle {
+  margin-top: 4px;
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ai-selection-toggle:hover {
+  text-decoration: underline;
+}
+.ai-custom input,
+.ai-custom textarea {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border-strong);
@@ -5806,8 +6149,12 @@ input::placeholder {
   background: var(--bg);
   color: var(--text);
   outline: none;
+  resize: vertical;
+  min-height: 56px;
+  line-height: 1.45;
 }
-.ai-custom input:focus {
+.ai-custom input:focus,
+.ai-custom textarea:focus {
   border-color: var(--accent);
 }
 .ai-output {
@@ -5815,12 +6162,18 @@ input::placeholder {
   border-radius: 8px;
   padding: 8px 10px;
   background: var(--bg-soft);
+  max-height: 40vh;
+  overflow-y: auto;
 }
-.ai-output pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font: inherit;
+.ai-output-body {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ai-output-body > :first-child {
+  margin-top: 0;
+}
+.ai-output-body > :last-child {
+  margin-bottom: 0;
 }
 .ai-actions {
   display: flex;
@@ -5860,14 +6213,25 @@ input::placeholder {
   overflow: auto;
   position: relative;
   background: #f3f3f3;
-  padding: 16px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+}
+.attachment-preview-body .react-pdf__Document,
+.pdf-viewer-body .react-pdf__Document {
+  width: 100%;
 }
 .pdf-page {
   position: relative;
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+}
+.pdf-page canvas {
+  max-width: 100%;
   background: white;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
@@ -5904,6 +6268,30 @@ input::placeholder {
 }
 .pdf-node .pdf-thumb button {
   font-size: 12px;
+}
+
+/* Knowledge_search citations rendered inline in chat replies */
+.kb-citation {
+  display: inline;
+  padding: 0 4px;
+  margin: 0 1px;
+  font-size: 0.92em;
+  color: var(--accent);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.kb-citation:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.attachment-pdf-page.kb-citation-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
 }
 
 /* Wikilinks + transclusion */

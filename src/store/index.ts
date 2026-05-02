@@ -43,7 +43,16 @@ export type HydrationData = {
   projects: Project[];
 };
 
-export type ViewMode = 'current' | 'global';
+/**
+ * Map view mode.
+ *
+ * - `current`: only nodes in the active conversation are rendered.
+ * - `global`: nodes from every visible project / unprojected conversation
+ *   are rendered.
+ * - `titles`: variant of `current` that hides the body of every node and
+ *   shows just a large title — for scanning a dense canvas at a glance.
+ */
+export type ViewMode = 'current' | 'global' | 'titles';
 export type RightTab = 'chat' | 'inspect';
 export type CanvasTool = 'select' | 'hand';
 
@@ -65,7 +74,29 @@ type UI = {
   detachedEditorNodeId: ID | null;
   /** Node currently being edited inline on the canvas; null when none. */
   editingNodeId: ID | null;
-  aiPalette: { open: boolean; selection: string; origin: string | null } | null;
+  /**
+   * AI palette state.
+   *
+   * - `selection`: the human-readable preview shown in the palette
+   *   modal (a quote of the user's text selection, file excerpt, or a
+   *   summary of canvas-selected nodes).
+   * - `systemContext`: the *full* source-of-truth context passed to
+   *   the model as a `system` message. Hidden from the UI on purpose —
+   *   when the palette is opened from a multi-node canvas selection,
+   *   `selection` is a short human label and the verbose markdown /
+   *   edge dump goes here instead so it doesn't clutter the modal.
+   * - `origin`: opaque pointer back to the caller (e.g.
+   *   `canvas-node:abc`, `canvas-selection:abc:0:42`, `pdf:...`,
+   *   `kb-file:...`) so the palette can auto-link the answer.
+   */
+  aiPalette:
+    | {
+        open: boolean;
+        selection: string;
+        origin: string | null;
+        systemContext?: string;
+      }
+    | null;
   sidebarCollapsed: boolean;
   expandedProjectIds: ID[];
   /** Projects whose nodes are shown in Global map. */
@@ -73,6 +104,29 @@ type UI = {
   /** Standalone (no-project) conversations shown in Global map. */
   globalVisibleConversationIds: ID[];
 };
+
+/**
+ * Canvas undo entry — captures the data we need to *re-create* a deleted
+ * node or edge. Not persisted; cleared on app restart. Cap is enforced
+ * at write time (`pushUndo`); the `undo` action pops the newest entry
+ * and restores it via the regular store mutations.
+ */
+export type UndoEntry =
+  | {
+      kind: 'remove-node';
+      /** The deleted node, snapshot at delete time. */
+      node: CanvasNode;
+      /** Edges that were also dropped because they referenced this node. */
+      edges: Edge[];
+      at: string;
+    }
+  | {
+      kind: 'remove-edge';
+      edge: Edge;
+      at: string;
+    };
+
+const UNDO_STACK_LIMIT = 10;
 
 type State = {
   hydrated: boolean;
@@ -88,6 +142,14 @@ type State = {
    * cleared on app restart. Cap: 200 entries (newest first).
    */
   artifactUsage: ArtifactUsageRecord[];
+  /**
+   * Recent canvas deletions that the user can roll back with Cmd-Z.
+   * Capped at {@link UNDO_STACK_LIMIT}; oldest entries are dropped.
+   * Not persisted across sessions — accidental deletes only need a
+   * short undo window, and a persistent stack would balloon the JSON
+   * snapshot for no real benefit.
+   */
+  undoStack: UndoEntry[];
   ui: UI;
 
   hydrate: (data: HydrationData) => void;
@@ -161,6 +223,14 @@ type State = {
   addEdge: (input: Omit<Edge, 'id' | 'createdAt'>) => Edge;
   removeEdge: (id: ID) => void;
 
+  /**
+   * Pop the newest entry off `undoStack` and re-apply it: a removed
+   * node's data and incident edges come back; a removed edge comes
+   * back. Returns true when something was restored. Idempotent — when
+   * the stack is empty, returns false.
+   */
+  undoCanvasDelete: () => boolean;
+
   addAttachment: (att: Attachment) => void;
   removeAttachment: (id: ID) => void;
 
@@ -204,7 +274,11 @@ type State = {
   setGraphImportOpen: (open: boolean) => void;
   setWorkspaceConfigOpen: (open: boolean) => void;
   setDetachedEditorNodeId: (id: ID | null) => void;
-  openAiPalette: (selection: string, origin: string | null) => void;
+  openAiPalette: (
+    selection: string,
+    origin: string | null,
+    systemContext?: string,
+  ) => void;
   closeAiPalette: () => void;
 };
 
@@ -243,6 +317,7 @@ export const useStore = create<State>()(
     projects: [],
     settings: defaultSettings,
     artifactUsage: [],
+    undoStack: [],
     ui: defaultUI,
 
     hydrate: (data) =>
@@ -773,23 +848,86 @@ export const useStore = create<State>()(
       })),
 
     removeNode: (id) =>
-      set((s) => ({
-        nodes: s.nodes.filter((n) => n.id !== id),
-        edges: s.edges.filter(
-          (e) => e.sourceNodeId !== id && e.targetNodeId !== id,
-        ),
-        ui: {
-          ...s.ui,
-          selectedNodeId: s.ui.selectedNodeId === id ? null : s.ui.selectedNodeId,
-          selectedNodeIds: s.ui.selectedNodeIds.filter((nid) => nid !== id),
-          selectedEdgeIds: s.ui.selectedEdgeIds.filter((eid) =>
-            s.edges.some(
-              (e) =>
-                e.id === eid && e.sourceNodeId !== id && e.targetNodeId !== id,
-            ),
+      set((s) => {
+        const removed = s.nodes.find((n) => n.id === id);
+        if (!removed) return {};
+        // Edges still attached at the moment we run. React Flow tends
+        // to dispatch `onEdgesChange` (cascading removals) BEFORE
+        // `onNodesChange`, so by the time we land here the incident
+        // edges are usually already gone — this list is mostly empty
+        // for delete-via-Backspace, and populated only when the
+        // caller explicitly removes a single node first.
+        const stillAttached = s.edges.filter(
+          (e) => e.sourceNodeId === id || e.targetNodeId === id,
+        );
+        // Absorb recent `remove-edge` undo entries that touch this
+        // node within a short time window. That covers the React-Flow
+        // cascade described above plus multi-node Backspace, where
+        // edges between two of the deleted nodes are removed first
+        // and would otherwise sit in the stack as standalone entries
+        // (Cmd-Z would restore the node but leave those edges
+        // dangling). The walk is full-stack — even past intervening
+        // `remove-node` entries from the same batch — but bounded by
+        // the timestamp window so older unrelated edge deletes are
+        // never folded in.
+        const ABSORB_WINDOW_MS = 750;
+        const nowMs = Date.now();
+        const absorbed: Edge[] = [];
+        const trimmedStack: UndoEntry[] = [];
+        for (const entry of s.undoStack) {
+          if (entry.kind === 'remove-edge') {
+            const at = Date.parse(entry.at);
+            const inWindow =
+              !Number.isNaN(at) && nowMs - at <= ABSORB_WINDOW_MS;
+            const touchesThisNode =
+              entry.edge.sourceNodeId === id ||
+              entry.edge.targetNodeId === id;
+            if (inWindow && touchesThisNode) {
+              absorbed.push(entry.edge);
+              continue;
+            }
+          }
+          trimmedStack.push(entry);
+        }
+        // Dedupe — `stillAttached` and `absorbed` should never
+        // overlap (an edge can't be both in the store *and* on the
+        // undo stack), but guard against double-restore just in case.
+        const seen = new Set<string>();
+        const allEdges: Edge[] = [];
+        for (const e of [...stillAttached, ...absorbed]) {
+          if (seen.has(e.id)) continue;
+          seen.add(e.id);
+          allEdges.push(e);
+        }
+        const newEntry: UndoEntry = {
+          kind: 'remove-node',
+          node: removed,
+          edges: allEdges,
+          at: now(),
+        };
+        const nextUndoStack = [
+          ...trimmedStack.slice(-(UNDO_STACK_LIMIT - 1)),
+          newEntry,
+        ];
+        return {
+          nodes: s.nodes.filter((n) => n.id !== id),
+          edges: s.edges.filter(
+            (e) => e.sourceNodeId !== id && e.targetNodeId !== id,
           ),
-        },
-      })),
+          undoStack: nextUndoStack,
+          ui: {
+            ...s.ui,
+            selectedNodeId: s.ui.selectedNodeId === id ? null : s.ui.selectedNodeId,
+            selectedNodeIds: s.ui.selectedNodeIds.filter((nid) => nid !== id),
+            selectedEdgeIds: s.ui.selectedEdgeIds.filter((eid) =>
+              s.edges.some(
+                (e) =>
+                  e.id === eid && e.sourceNodeId !== id && e.targetNodeId !== id,
+              ),
+            ),
+          },
+        };
+      }),
 
     addEdge: (input) => {
       const id = newId();
@@ -800,13 +938,76 @@ export const useStore = create<State>()(
     },
 
     removeEdge: (id) =>
-      set((s) => ({
-        edges: s.edges.filter((e) => e.id !== id),
-        ui: {
-          ...s.ui,
-          selectedEdgeIds: s.ui.selectedEdgeIds.filter((eid) => eid !== id),
-        },
-      })),
+      set((s) => {
+        const removed = s.edges.find((e) => e.id === id);
+        const nextUndoStack = removed
+          ? [
+              ...s.undoStack.slice(-(UNDO_STACK_LIMIT - 1)),
+              {
+                kind: 'remove-edge' as const,
+                edge: removed,
+                at: now(),
+              },
+            ]
+          : s.undoStack;
+        return {
+          edges: s.edges.filter((e) => e.id !== id),
+          undoStack: nextUndoStack,
+          ui: {
+            ...s.ui,
+            selectedEdgeIds: s.ui.selectedEdgeIds.filter((eid) => eid !== id),
+          },
+        };
+      }),
+
+    undoCanvasDelete: () => {
+      let restored = false;
+      set((s) => {
+        if (s.undoStack.length === 0) return {};
+        const stack = s.undoStack.slice();
+        const entry = stack.pop();
+        if (!entry) return {};
+        if (entry.kind === 'remove-node') {
+          // Skip restoring if a node with the same id is somehow already
+          // back in the store (shouldn't happen with nanoid, but better
+          // safe than to duplicate ids and break selection lookups).
+          const nodeBack = s.nodes.some((n) => n.id === entry.node.id);
+          const nextNodes = nodeBack ? s.nodes : [...s.nodes, entry.node];
+          // Re-attach only edges whose endpoints both exist now (after
+          // node restore). Drop edges whose other endpoint has been
+          // permanently deleted in the meantime.
+          const nodeIds = new Set(nextNodes.map((n) => n.id));
+          const edgesToRestore = entry.edges.filter(
+            (e) =>
+              !s.edges.some((existing) => existing.id === e.id) &&
+              nodeIds.has(e.sourceNodeId) &&
+              nodeIds.has(e.targetNodeId),
+          );
+          restored = !nodeBack || edgesToRestore.length > 0;
+          return {
+            nodes: nextNodes,
+            edges: [...s.edges, ...edgesToRestore],
+            undoStack: stack,
+          };
+        }
+        // remove-edge entry
+        const edgeBack = s.edges.some((e) => e.id === entry.edge.id);
+        const stillValid =
+          s.nodes.some((n) => n.id === entry.edge.sourceNodeId) &&
+          s.nodes.some((n) => n.id === entry.edge.targetNodeId);
+        if (edgeBack || !stillValid) {
+          // Pop the entry but don't restore — endpoints gone or already
+          // re-added through some other path.
+          return { undoStack: stack };
+        }
+        restored = true;
+        return {
+          edges: [...s.edges, entry.edge],
+          undoStack: stack,
+        };
+      });
+      return restored;
+    },
 
     addAttachment: (att) =>
       set((s) => ({ attachments: [...s.attachments, att] })),
@@ -1023,9 +1224,12 @@ export const useStore = create<State>()(
     setEditingNode: (id) =>
       set((s) => ({ ui: { ...s.ui, editingNodeId: id } })),
 
-    openAiPalette: (selection, origin) =>
+    openAiPalette: (selection, origin, systemContext) =>
       set((s) => ({
-        ui: { ...s.ui, aiPalette: { open: true, selection, origin } },
+        ui: {
+          ...s.ui,
+          aiPalette: { open: true, selection, origin, systemContext },
+        },
       })),
 
     closeAiPalette: () =>

@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { artifacts } from '../artifacts';
 import { secrets, SECRET_KEY } from '../secrets';
 import { useStore } from '../../store';
+import {
+  readConversationProjectDocumentRange,
+  searchConversationProjectKnowledge,
+} from '../knowledge/projectRetrieval';
 import type { ArtifactRequest, ArtifactResult } from '../artifacts';
 import type { ID } from '../../types';
 
@@ -153,8 +157,74 @@ export async function buildTools(
     },
   });
 
+  const knowledgeSearchTool = tool({
+    description:
+      'Search the current project Knowledge Base raw documents. Use this before making project-specific factual claims, when the user asks about a PDF/document/source, or when a filename, title, quote, section, concept, or project-specific fact may live in raw/. Returns cited snippets only; it does not load every document.',
+    inputSchema: z.object({
+      query: z.string().min(1).describe('Search query for project documents.'),
+      topK: z.number().int().min(1).max(12).optional(),
+      tokenBudget: z.number().int().min(200).max(6000).optional(),
+    }),
+    execute: async (args) => {
+      try {
+        const result = await searchConversationProjectKnowledge(conversationId, {
+          query: args.query,
+          topK: args.topK,
+          tokenBudget: args.tokenBudget,
+        });
+        return {
+          ok: true,
+          projectName: result.projectName,
+          processedDir: result.processedDir,
+          resultCount: result.results.length,
+          results: result.results,
+          message:
+            result.results.length > 0
+              ? `Found ${result.results.length} project knowledge snippet(s).`
+              : 'No matching project knowledge snippets were found.',
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+  });
+
+  const knowledgeReadRangeTool = tool({
+    description:
+      'Read exact canonical project-document text by documentId and page or sentence range. Use this after knowledge_search when exact wording, a precise citation, or surrounding source context matters.',
+    inputSchema: z.object({
+      documentId: z.string().min(1),
+      pageStart: z.number().int().min(1).optional(),
+      pageEnd: z.number().int().min(1).optional(),
+      sentenceStart: z.number().int().min(0).optional(),
+      sentenceEnd: z.number().int().min(0).optional(),
+    }),
+    execute: async (args) => {
+      try {
+        const result = await readConversationProjectDocumentRange(conversationId, {
+          documentId: args.documentId,
+          pageStart: args.pageStart,
+          pageEnd: args.pageEnd,
+          sentenceStart: args.sentenceStart,
+          sentenceEnd: args.sentenceEnd,
+        });
+        return { ok: true, ...result };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+  });
+
   const out: Record<string, unknown> = {
     create_text_artifact: textArtifactTool,
+    knowledge_search: knowledgeSearchTool,
+    knowledge_read_document_range: knowledgeReadRangeTool,
   };
   if (hasAnthropic || hasOpenAi) {
     out.create_document_artifact = documentArtifactTool;

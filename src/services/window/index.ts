@@ -6,14 +6,14 @@ import {
 } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-export type WindowView = 'main' | 'chat' | 'canvas' | 'markdown';
-export type LayoutPreset = 'main' | 'chatFocused' | 'canvasFocused';
+export type WindowView = 'main' | 'chat' | 'canvas' | 'markdown' | 'tree';
+export type LayoutPreset = 'main' | 'chatFocused' | 'canvasFocused' | 'treeFocused';
 
 export type WindowLifecycleEvent = {
   event: 'created' | 'focused' | 'closed';
   windowId: string;
   tabId: string | null;
-  view: 'chat' | 'canvas';
+  view: 'chat' | 'canvas' | 'tree';
 };
 
 export function getCurrentView(): WindowView {
@@ -21,9 +21,10 @@ export function getCurrentView(): WindowView {
   const preset = getInitialLayoutPreset();
   if (preset === 'chatFocused') return 'chat';
   if (preset === 'canvasFocused') return 'canvas';
+  if (preset === 'treeFocused') return 'tree';
   const url = new URL(window.location.href);
   const v = url.searchParams.get('view');
-  if (v === 'chat' || v === 'canvas') return v;
+  if (v === 'chat' || v === 'canvas' || v === 'tree') return v;
   if (url.searchParams.get('windowId') && url.searchParams.get('chatId')) {
     return 'chat';
   }
@@ -38,10 +39,17 @@ export function getInitialMarkdownPath(): string | null {
 export function getInitialLayoutPreset(): LayoutPreset {
   const url = new URL(window.location.href);
   const preset = url.searchParams.get('layoutPreset');
-  if (preset === 'chatFocused' || preset === 'canvasFocused') return preset;
+  if (
+    preset === 'chatFocused' ||
+    preset === 'canvasFocused' ||
+    preset === 'treeFocused'
+  ) {
+    return preset;
+  }
   const legacy = url.searchParams.get('windowType') || url.searchParams.get('view');
   if (legacy === 'chat') return 'chatFocused';
   if (legacy === 'canvas') return 'canvasFocused';
+  if (legacy === 'tree') return 'treeFocused';
   return 'main';
 }
 
@@ -84,11 +92,16 @@ export async function detachTabToWindow(tabId: string): Promise<string> {
 }
 
 export async function detachViewToWindow(
-  view: 'chat' | 'canvas',
+  view: 'chat' | 'canvas' | 'tree',
   tabId?: string,
 ): Promise<string> {
   try {
-    const layoutPreset = view === 'canvas' ? 'canvasFocused' : 'chatFocused';
+    const layoutPreset =
+      view === 'canvas'
+        ? 'canvasFocused'
+        : view === 'tree'
+          ? 'treeFocused'
+          : 'chatFocused';
     const payload = tabId
       ? { view, layoutPreset, tabId, sourceTabId: tabId, chatId: tabId }
       : { view, layoutPreset };
@@ -111,6 +124,19 @@ export async function openChatWindow(chatId: string): Promise<string> {
 
 export async function openCanvasWorkspaceWindow(chatId?: string): Promise<string> {
   return detachViewToWindow('canvas', chatId);
+}
+
+/**
+ * Open the synced relationship-tree window. The window renders the
+ * active conversation's parent-edge tree as fixed-size title cards
+ * laid out by dagre. Clicking a tree node sends a `focus-canvas-node`
+ * broadcast which the main canvas window picks up to select + zoom
+ * to the same node. See spec 36.
+ */
+export async function openRelationshipTreeWindow(
+  chatId?: string,
+): Promise<string> {
+  return detachViewToWindow('tree', chatId);
 }
 
 export async function openMarkdownEditorWindow(
@@ -170,7 +196,13 @@ export async function onWindowLifecycle(
 export type Broadcast =
   | { kind: 'store-patch'; data: unknown }
   | { kind: 'drag-message-start'; messageId: string }
-  | { kind: 'drag-message-end'; messageId: string };
+  | { kind: 'drag-message-end'; messageId: string }
+  /**
+   * Sent by the relationship-tree window when the user clicks a node.
+   * Receivers (typically the main canvas window) should select the
+   * referenced node and zoom to it. See spec 36.
+   */
+  | { kind: 'focus-canvas-node'; nodeId: string; conversationId: string };
 
 export type CrossWindowDragPayload = {
   id: string;

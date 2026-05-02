@@ -13,10 +13,12 @@ import type { CanvasSelectionMarker } from '../../types';
 import {
   ensureNodeMarkdownPath,
 } from '../../services/markdown/MarkdownContextResolver';
+import { isMirrorManagedPath } from '../../services/knowledge/knowledgeBaseLayout';
 import {
   markdownFiles,
   resolveMarkdownRoot,
 } from '../../services/storage/MarkdownFileService';
+import { autoTitleNode } from '../../services/chat/autoTitle';
 
 
 export type MarkdownNodeData = {
@@ -120,15 +122,32 @@ function MarkdownNodeImpl({
   async function saveDraft(nextMarkdown = draft) {
     const rootPath = await resolveMarkdownRoot(useStore.getState().settings.markdownStorageDir);
     const path = await ensureNodeMarkdownPath(rootPath, id);
-    if (path) {
+    if (path && !isMirrorManagedPath(path)) {
+      // Refuse to overwrite a mirror-managed file. `ensureNodeMarkdownPath`
+      // already filters these out and mints a fresh canonical path, so a
+      // mirror path here means something raced or a future caller bypassed
+      // the helper — better to skip the write than corrupt frontmatter.
       await markdownFiles.writeFile(rootPath, path, nextMarkdown);
     }
+    // Set the heuristic title immediately (fast, no network) so the
+    // node label updates the moment the user commits the edit.
+    const heuristicTitle = titleFromMarkdown(nextMarkdown, data.title);
     updateNode(id, {
-      title: titleFromMarkdown(nextMarkdown, data.title),
+      title: heuristicTitle,
       contentMarkdown: nextMarkdown,
       ...(path ? { mdPath: path } : {}),
     });
     setEditingNode(null);
+    // Refine the title in the background using the free Groq Llama
+    // model when configured. Skipped automatically when the user has
+    // hand-edited the title (autoTitleNode checks the placeholder
+    // pattern). Errors are swallowed.
+    void autoTitleNode({
+      nodeId: id,
+      kind: 'note',
+    }).catch((err: unknown) =>
+      console.warn('[autoTitleNode] markdown node failed', err),
+    );
   }
 
   function cancelEdit() {

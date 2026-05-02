@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useStore } from '../../store';
 import { dialog } from '../../services/dialog';
 import { attachments as attachmentsService } from '../../services/attachments';
+import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
 import type { ID } from '../../types';
 
 export type NodeContextMenuState = {
@@ -25,6 +26,11 @@ export function NodeContextMenu({
   const setDetached = useStore((s) => s.setDetachedEditorNodeId);
   const setConversationProject = useStore((s) => s.setConversationProject);
   const ref = useRef<HTMLDivElement>(null);
+  // Measured clamp — flips left / up when the cursor lands near the
+  // viewport edge so the menu always stays fully visible. Replaces the
+  // earlier fixed-direction `Math.min` clamp that hard-coded 220×280
+  // (often wrong after items were added).
+  const pos = useClampedMenuPosition(ref, state.x, state.y);
 
   useEffect(() => {
     // Use pointerdown in capture phase: the canvas's marquee handler calls
@@ -102,15 +108,11 @@ export function NodeContextMenu({
     onClose();
   }
 
-  // Clamp position to viewport
-  const left = Math.min(state.x, window.innerWidth - 220);
-  const top = Math.min(state.y, window.innerHeight - 280);
-
   return (
     <div
       className="node-context-menu"
       ref={ref}
-      style={{ left, top }}
+      style={{ left: pos.x, top: pos.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
       <button type="button" onClick={openEditor}>

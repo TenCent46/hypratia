@@ -97,8 +97,11 @@ function ArtifactNodeImpl({ data, selected, id }: NodeProps<ArtifactNodeType>) {
       />
       <div
         className={`markdown-node artifact-node${selected ? ' selected' : ''}`}
-        onDoubleClick={() => void open()}
-        title="Double-click to open with the default app"
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          preview();
+        }}
+        title="Double-click to preview in-app · Open externally below"
       >
         <NodeHandles />
         <div className="title">
@@ -141,8 +144,9 @@ function ArtifactNodeImpl({ data, selected, id }: NodeProps<ArtifactNodeType>) {
                 e.stopPropagation();
                 void open();
               }}
+              title="Open with system default app"
             >
-              Open
+              Open externally
             </button>
             <button
               type="button"

@@ -177,6 +177,48 @@ fn safe_child_name(name: &str, must_be_markdown: bool) -> Result<String, String>
     Ok(trimmed.to_string())
 }
 
+fn build_full_tree(path: &Path, root: &Path) -> Result<MarkdownTreeNode, String> {
+    let name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| {
+            root.file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Local Markdown".to_string())
+        });
+    let rel_path = path
+        .strip_prefix(root)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if path.is_dir() {
+        let mut children = Vec::new();
+        for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let child = entry.path();
+            children.push(build_full_tree(&child, root)?);
+        }
+        children.sort_by(|a, b| {
+            let ka = if a.kind == "folder" { 0 } else { 1 };
+            let kb = if b.kind == "folder" { 0 } else { 1 };
+            ka.cmp(&kb)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        Ok(MarkdownTreeNode {
+            name,
+            path: rel_path,
+            kind: "folder".to_string(),
+            children: Some(children),
+        })
+    } else {
+        Ok(MarkdownTreeNode {
+            name,
+            path: rel_path,
+            kind: "file".to_string(),
+            children: None,
+        })
+    }
+}
+
 fn build_markdown_tree(path: &Path, root: &Path) -> Result<MarkdownTreeNode, String> {
     let name = path
         .file_name()
@@ -237,6 +279,15 @@ fn build_markdown_tree(path: &Path, root: &Path) -> Result<MarkdownTreeNode, Str
 fn list_markdown_tree(root_path: String) -> Result<MarkdownTreeNode, String> {
     let root = canonical_root(&root_path)?;
     build_markdown_tree(&root, &root)
+}
+
+/// Recursively walk `root_path` and return every file (regardless of
+/// extension) plus its parent folders. Used by the workspace-config
+/// "Files" view so non-markdown reference materials in `raw/` show up.
+#[tauri::command]
+fn list_full_tree(root_path: String) -> Result<MarkdownTreeNode, String> {
+    let root = canonical_root(&root_path)?;
+    build_full_tree(&root, &root)
 }
 
 #[tauri::command]
@@ -330,8 +381,7 @@ fn rename_path(root_path: String, path: String, new_name: String) -> Result<Stri
         return Err("cannot rename the markdown root".to_string());
     }
     let target = ensure_inside(&root_path, &path)?;
-    let is_file = target.is_file();
-    let safe = safe_child_name(&new_name, is_file)?;
+    let safe = safe_child_name(&new_name, false)?;
     let parent = target
         .parent()
         .ok_or_else(|| "path has no parent".to_string())?;
@@ -352,6 +402,189 @@ fn delete_path(root_path: String, path: String) -> Result<(), String> {
     } else {
         fs::remove_file(target).map_err(|e| e.to_string())
     }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite FTS5 lexical index for project knowledge retrieval (spec 16).
+//
+// One DB file per project, stored at `<root>/<scope>/processed/index.sqlite`.
+// The TS side hands us the resolved path (relative to the markdown root) and
+// the chunks to index; we manage the schema, ingestion, and BM25-ranked
+// search here. Bundled SQLite ships FTS5 by default, so no plugin or capability
+// changes are required beyond `rusqlite`'s `bundled` feature.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FtsChunkInput {
+    chunk_id: String,
+    document_id: String,
+    source_path: String,
+    title: String,
+    heading_path: Option<String>,
+    page_start: Option<i64>,
+    page_end: Option<i64>,
+    sentence_start: Option<i64>,
+    sentence_end: Option<i64>,
+    contextual_text: Option<String>,
+    text: String,
+    token_count: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FtsSearchResult {
+    chunk_id: String,
+    document_id: String,
+    source_path: String,
+    title: String,
+    heading_path: Option<String>,
+    page_start: Option<i64>,
+    page_end: Option<i64>,
+    sentence_start: Option<i64>,
+    sentence_end: Option<i64>,
+    contextual_text: Option<String>,
+    text: String,
+    token_count: Option<i64>,
+    /// Lower BM25 = better match. We negate it for the TS-side score so a
+    /// higher number is "more relevant" — matching the convention used by
+    /// the existing JSON BM25 implementation.
+    bm25: f64,
+    score: f64,
+}
+
+fn fts_open_db(root_path: &str, db_rel_path: &str) -> Result<rusqlite::Connection, String> {
+    let abs = ensure_inside(root_path, db_rel_path)?;
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create FTS index dir: {e}"))?;
+    }
+    let conn = rusqlite::Connection::open(&abs)
+        .map_err(|e| format!("failed to open FTS index db: {e}"))?;
+    // PRAGMAs once per open. WAL is friendlier to concurrent reads while a
+    // rebuild is writing; synchronous=NORMAL is the standard WAL pairing.
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;\n         PRAGMA synchronous = NORMAL;\n         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(\n           chunk_id UNINDEXED,\n           document_id UNINDEXED,\n           source_path UNINDEXED,\n           title UNINDEXED,\n           heading_path UNINDEXED,\n           page_start UNINDEXED,\n           page_end UNINDEXED,\n           sentence_start UNINDEXED,\n           sentence_end UNINDEXED,\n           token_count UNINDEXED,\n           contextual_text,\n           text,\n           tokenize='unicode61 remove_diacritics 2'\n         );",
+    )
+    .map_err(|e| format!("failed to init FTS schema: {e}"))?;
+    Ok(conn)
+}
+
+#[tauri::command]
+fn fts_index_replace(
+    root_path: String,
+    db_rel_path: String,
+    chunks: Vec<FtsChunkInput>,
+) -> Result<u32, String> {
+    let mut conn = fts_open_db(&root_path, &db_rel_path)?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("failed to begin tx: {e}"))?;
+    tx.execute("DELETE FROM chunks_fts;", [])
+        .map_err(|e| format!("failed to clear chunks_fts: {e}"))?;
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO chunks_fts (chunk_id, document_id, source_path, title, heading_path, page_start, page_end, sentence_start, sentence_end, token_count, contextual_text, text) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);",
+            )
+            .map_err(|e| format!("failed to prepare insert: {e}"))?;
+        for c in &chunks {
+            stmt.execute(rusqlite::params![
+                c.chunk_id,
+                c.document_id,
+                c.source_path,
+                c.title,
+                c.heading_path,
+                c.page_start,
+                c.page_end,
+                c.sentence_start,
+                c.sentence_end,
+                c.token_count,
+                c.contextual_text,
+                c.text,
+            ])
+            .map_err(|e| format!("failed to insert chunk {}: {e}", c.chunk_id))?;
+        }
+    }
+    // Tell FTS5 to merge B-trees so subsequent queries are fast. Cheap on
+    // the corpus sizes we expect (a few thousand chunks max).
+    tx.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('optimize');", [])
+        .map_err(|e| format!("failed to optimize: {e}"))?;
+    tx.commit().map_err(|e| format!("failed to commit: {e}"))?;
+    Ok(chunks.len() as u32)
+}
+
+#[tauri::command]
+fn fts_index_search(
+    root_path: String,
+    db_rel_path: String,
+    query: String,
+    top_k: Option<u32>,
+) -> Result<Vec<FtsSearchResult>, String> {
+    let conn = fts_open_db(&root_path, &db_rel_path)?;
+    let limit = top_k.unwrap_or(20).min(200) as i64;
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Sanitize: escape any bare double-quotes inside tokens, then wrap each
+    // whitespace-separated token in `"…"` quotes so FTS5 reads them as
+    // literal phrases instead of trying to parse them as boolean operators
+    // or column filters. `OR` between tokens keeps the search permissive —
+    // closer to the BM25-over-bag-of-words behaviour the JSON index had.
+    let sanitized: Vec<String> = trimmed
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|t| {
+            let escaped = t.replace('"', "\"\"");
+            format!("\"{escaped}\"")
+        })
+        .collect();
+    if sanitized.is_empty() {
+        return Ok(Vec::new());
+    }
+    let match_query = sanitized.join(" OR ");
+    let mut stmt = conn
+        .prepare(
+            "SELECT chunk_id, document_id, source_path, title, heading_path, page_start, page_end, sentence_start, sentence_end, token_count, contextual_text, text, bm25(chunks_fts) AS rank FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY rank LIMIT ?2;",
+        )
+        .map_err(|e| format!("failed to prepare search: {e}"))?;
+    let rows = stmt
+        .query_map(rusqlite::params![match_query, limit], |row| {
+            let bm25: f64 = row.get(12)?;
+            Ok(FtsSearchResult {
+                chunk_id: row.get(0)?,
+                document_id: row.get(1)?,
+                source_path: row.get(2)?,
+                title: row.get(3)?,
+                heading_path: row.get(4)?,
+                page_start: row.get(5)?,
+                page_end: row.get(6)?,
+                sentence_start: row.get(7)?,
+                sentence_end: row.get(8)?,
+                token_count: row.get(9)?,
+                contextual_text: row.get(10)?,
+                text: row.get(11)?,
+                bm25,
+                // Higher = better. FTS5's bm25() returns *lower-is-better*,
+                // and is always negative for matching rows; flip the sign.
+                score: -bm25,
+            })
+        })
+        .map_err(|e| format!("failed to run search: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("failed to read row: {e}"))?);
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn fts_index_clear(root_path: String, db_rel_path: String) -> Result<(), String> {
+    let conn = fts_open_db(&root_path, &db_rel_path)?;
+    conn.execute("DELETE FROM chunks_fts;", [])
+        .map_err(|e| format!("failed to clear: {e}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -471,18 +704,21 @@ async fn detach_tab_to_window(
     layout_preset: Option<String>,
     markdown_path: Option<String>,
 ) -> Result<String, String> {
-    let layout_preset = layout_preset.unwrap_or_else(|| {
-        if view.as_deref() == Some("canvas") {
-            "canvasFocused".to_string()
-        } else {
-            "chatFocused".to_string()
-        }
+    let layout_preset = layout_preset.unwrap_or_else(|| match view.as_deref() {
+        Some("canvas") => "canvasFocused".to_string(),
+        Some("tree") => "treeFocused".to_string(),
+        _ => "chatFocused".to_string(),
     });
-    if layout_preset != "chatFocused" && layout_preset != "canvasFocused" {
+    if layout_preset != "chatFocused"
+        && layout_preset != "canvasFocused"
+        && layout_preset != "treeFocused"
+    {
         return Err(format!("invalid layoutPreset: {layout_preset}"));
     }
     let panel = if layout_preset == "canvasFocused" {
         "canvas"
+    } else if layout_preset == "treeFocused" {
+        "tree"
     } else {
         "chat"
     };
@@ -491,15 +727,19 @@ async fn detach_tab_to_window(
 
     let (w, h) = if panel == "chat" {
         (520, 760)
+    } else if panel == "tree" {
+        (640, 800)
     } else {
         (1080, 780)
     };
     let title = if markdown_path.is_some() {
-        "Memory Canvas - Markdown"
+        "Hypratia - Markdown"
     } else if panel == "chat" {
-        "Memory Canvas - Chat"
+        "Hypratia - Chat"
+    } else if panel == "tree" {
+        "Hypratia - Relationship Tree"
     } else {
-        "Memory Canvas - Canvas"
+        "Hypratia - Canvas"
     };
     let offset = (seq as f64) * 28.0;
 
@@ -642,6 +882,7 @@ pub fn run() {
             resolve_cross_window_drag,
             cancel_cross_window_drag,
             list_markdown_tree,
+            list_full_tree,
             read_markdown_file,
             try_read_markdown_file,
             write_markdown_file,
@@ -649,6 +890,9 @@ pub fn run() {
             create_folder,
             rename_path,
             delete_path,
+            fts_index_replace,
+            fts_index_search,
+            fts_index_clear,
             reveal_markdown_path,
             detach_tab_to_window,
             focus_window,
@@ -661,6 +905,9 @@ pub fn run() {
             let about_meta = AboutMetadataBuilder::new()
                 .name(Some("Hypratia"))
                 .version(Some(env!("CARGO_PKG_VERSION").to_string()))
+                .comments(Some("Local-first AI thinking workspace."))
+                .license(Some("MIT"))
+                .copyright(Some("Copyright (c) 2026 Hypratia contributors"))
                 .build();
 
             // App menu (macOS shows app name as the menu title)
@@ -748,8 +995,13 @@ pub fn run() {
                 .id("canvas:new-window")
                 .accelerator("CmdOrCtrl+Alt+T")
                 .build(handle)?;
+            let open_tree_window = MenuItemBuilder::new("Open Relationship Tree Window")
+                .id("canvas:open-tree-window")
+                .build(handle)?;
             let canvas_menu = SubmenuBuilder::new(handle, "Canvas")
                 .item(&new_canvas_window)
+                .separator()
+                .item(&open_tree_window)
                 .build()?;
 
             // View menu

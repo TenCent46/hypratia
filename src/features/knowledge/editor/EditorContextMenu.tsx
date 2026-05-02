@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 
 export type EditorContextMenuItem =
   | {
@@ -21,6 +22,7 @@ export function EditorContextMenu({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const pos = useClampedMenuPosition(ref, x, y);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -42,7 +44,7 @@ export function EditorContextMenu({
     <div
       ref={ref}
       className="knowledge-menu editor-context-menu"
-      style={{ left: x, top: y }}
+      style={{ left: pos.x, top: pos.y }}
       role="menu"
     >
       {items.map((item, idx) => {

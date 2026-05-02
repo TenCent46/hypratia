@@ -1,7 +1,8 @@
 [package]
 name = "memory-canvas"
 version = "1.1.0-beta.1"
-description = "Memory Canvas — spatial memory layer for LLM conversations"
+description = "Hypratia - spatial memory layer for LLM conversations"
+license = "MIT"
 authors = ["you"]
 edition = "2021"
 
@@ -24,3 +25,7 @@ tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Bundled SQLite (compiled from amalgamation) — FTS5 ships in the default
+# build, so we get full-text search for the project knowledge index
+# without pulling in a separate plugin. See spec 16.
+rusqlite = { version = "0.32", features = ["bundled"] }

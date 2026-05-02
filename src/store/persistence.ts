@@ -43,7 +43,22 @@ async function safeLoad<T>(key: StorageKey, fallback: T): Promise<T> {
   }
 }
 
+// Records written before the vault-canonical migration lacked `storageRoot`.
+// They all live under appData/attachments/, so default-fill the field here
+// rather than rewriting the JSON on disk. Idempotent for already-tagged
+// records.
+function normalizeAttachments(list: Attachment[]): Attachment[] {
+  let mutated = false;
+  const out = list.map((att) => {
+    if (att.storageRoot) return att;
+    mutated = true;
+    return { ...att, storageRoot: 'appData' as const };
+  });
+  return mutated ? out : list;
+}
+
 export async function hydrateAndWire(): Promise<void> {
+  console.info('[knowledge-mirror] hydrateAndWire() entered');
   const [
     conversations,
     messages,
@@ -73,7 +88,7 @@ export async function hydrateAndWire(): Promise<void> {
     nodes,
     edges,
     settings,
-    attachments,
+    attachments: normalizeAttachments(attachments),
     projects,
   });
 
@@ -154,26 +169,54 @@ export async function hydrateAndWire(): Promise<void> {
   let mirrorRunning = false;
   function scheduleMirror() {
     if (applyingRemote) return;
+    console.info('[knowledge-mirror] scheduleMirror() called');
     if (mirrorTimer) clearTimeout(mirrorTimer);
     mirrorTimer = setTimeout(runMirror, MIRROR_DEBOUNCE_MS);
   }
   async function runMirror() {
+    console.info(
+      `[knowledge-mirror] runMirror() entered (running=${mirrorRunning})`,
+    );
     if (mirrorRunning) {
       mirrorPending = true;
       return;
     }
     mirrorRunning = true;
+    const t0 =
+      typeof performance !== 'undefined' ? performance.now() : Date.now();
     try {
       const s = useStore.getState();
+      const configuredRoot = s.settings.markdownStorageDir;
+      // Always log this so users diagnosing "my chat-history folder is
+      // empty" can see (a) whether a custom working folder is set, and
+      // (b) what conversation/project counts are actually in the store.
+      // If `configuredRoot` is undefined the resolver falls back to
+      // `<appData>/LLM-Conversations` — that's where files end up,
+      // which is rarely where the user is looking.
+      console.info(
+        `[knowledge-mirror] runMirror start: configuredRoot=${
+          configuredRoot ?? '<unset → appData/LLM-Conversations>'
+        } conversations=${s.conversations.length} messages=${
+          s.messages.length
+        } nodes=${s.nodes.length} edges=${s.edges.length} projects=${
+          s.projects.length
+        } incognito=${s.settings.incognitoUnprojectedChats ?? false}`,
+      );
       const result = await syncConversationMirror({
         conversations: s.conversations,
         messages: s.messages,
         nodes: s.nodes,
         edges: s.edges,
         projects: s.projects,
-        markdownStorageDir: s.settings.markdownStorageDir,
+        markdownStorageDir: configuredRoot,
         incognitoUnprojectedChats: s.settings.incognitoUnprojectedChats,
       });
+      const dt = Math.round(
+        (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0,
+      );
+      console.info(
+        `[knowledge-mirror] runMirror done in ${dt}ms: rootPath=${result.rootPath} written=${result.written} nodeWritten=${result.nodeWritten} edgesWritten=${result.edgesWritten} skipped=${result.skipped} incognitoSkipped=${result.incognitoSkipped} errors=${result.errors.length}`,
+      );
       if (result.errors.length > 0) {
         // Log each error on its own line so they survive aggressive
         // devtools log filters (a single `console.warn(arr)` call hides
@@ -238,6 +281,22 @@ export async function hydrateAndWire(): Promise<void> {
 
   // Listen for store patches from sibling windows.
   void onBroadcast((payload) => {
+    if (payload.kind === 'focus-canvas-node') {
+      // Bridge the cross-window focus signal into the local
+      // `mc:focus-canvas-node` event the CanvasPanel already listens
+      // to. The main canvas window's existing handler then selects +
+      // zooms to the node. See spec 36.
+      if (typeof window === 'undefined') return;
+      window.dispatchEvent(
+        new CustomEvent('mc:focus-canvas-node', {
+          detail: {
+            nodeId: payload.nodeId,
+            conversationId: payload.conversationId,
+          },
+        }),
+      );
+      return;
+    }
     if (payload.kind !== 'store-patch') return;
     const data = payload.data as { slice?: SliceName; value?: unknown };
     if (!data?.slice) return;
@@ -262,7 +321,9 @@ export async function hydrateAndWire(): Promise<void> {
           setState({ settings: data.value as Settings });
           break;
         case 'attachments':
-          setState({ attachments: data.value as Attachment[] });
+          setState({
+            attachments: normalizeAttachments(data.value as Attachment[]),
+          });
           break;
         case 'projects':
           setState({ projects: data.value as Project[] });

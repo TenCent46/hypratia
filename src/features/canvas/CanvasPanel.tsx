@@ -49,8 +49,7 @@ import {
   resolveCrossWindowDragPayload,
 } from './dnd';
 import { ingestDroppedFiles } from './ingest';
-import { useChatStream } from '../chat/useChatStream';
-import { chat, getModelMeta, type ChatMessage } from '../../services/llm';
+import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
 import {
   findFreeNodePosition,
   rectFromPoints,
@@ -62,11 +61,9 @@ import {
   ensureNodeMarkdownPath,
 } from '../../services/markdown/MarkdownContextResolver';
 import { searchMarkdownFiles, type MarkdownSearchResult, type MarkdownSearchScope } from '../../services/markdown/MarkdownSearchService';
-import { markdownFiles, resolveMarkdownRoot } from '../../services/storage/MarkdownFileService';
-import { syncWikiLinkBetweenNodes, wikiTitle } from '../../services/markdown/WikiLinkSyncService';
+import { resolveMarkdownRoot } from '../../services/storage/MarkdownFileService';
+import { syncWikiLinkBetweenNodes } from '../../services/markdown/WikiLinkSyncService';
 import { buildCanvasAskContext } from '../../services/canvas/CanvasAskService';
-import { newId } from '../../lib/ids';
-import { now } from '../../lib/time';
 
 const nodeTypes: NodeTypes = {
   markdown: MarkdownNode,
@@ -86,19 +83,6 @@ const MAX_CANVAS_ZOOM = 100;
 function deriveTitle(content: string): string {
   const firstLine = content.split('\n')[0]?.trim() ?? '';
   return firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
-}
-
-function plainTextForContext(markdown: string): string {
-  return markdown
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/[*_`>#[\]()]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function titleFromAnswer(question: string): string {
-  const clean = question.replace(/\s+/g, ' ').trim();
-  return clean ? `Answer: ${clean.slice(0, 64)}` : 'Answer';
 }
 
 function rectBoundaryPoint(
@@ -281,26 +265,22 @@ export function CanvasPanel({
   const toggleWheelMode = () =>
     setCanvasWheelMode(wheelMode === 'pan' ? 'zoom' : 'pan');
   const editingNodeId = useStore((s) => s.ui.editingNodeId);
+  const setEditingNode = useStore((s) => s.setEditingNode);
   const viewportByConv = useStore((s) => s.settings.viewportByConversation);
   const updateNodePosition = useStore((s) => s.updateNodePosition);
   const updateNodeSize = useStore((s) => s.updateNodeSize);
   const setViewport = useStore((s) => s.setViewport);
   const addNode = useStore((s) => s.addNode);
-  const updateNode = useStore((s) => s.updateNode);
   const removeNode = useStore((s) => s.removeNode);
   const addEdge = useStore((s) => s.addEdge);
   const removeEdge = useStore((s) => s.removeEdge);
   const ensureConversation = useStore((s) => s.ensureConversation);
-  const addMessage = useStore((s) => s.addMessage);
-  const addUsage = useStore((s) => s.addConversationUsage);
   const selectNode = useStore((s) => s.selectNode);
   const selectedNodeIds = useStore((s) => s.ui.selectedNodeIds);
   const selectedEdgeIds = useStore((s) => s.ui.selectedEdgeIds);
   const setCanvasSelection = useStore((s) => s.setCanvasSelection);
   const clearCanvasSelection = useStore((s) => s.clearCanvasSelection);
-  const setActiveRightTab = useStore((s) => s.setActiveRightTab);
   const flow = useReactFlow();
-  const { send } = useChatStream();
   const [dragOver, setDragOver] = useState(false);
   const [dropTargetNodeId, setDropTargetNodeId] = useState<string | null>(null);
   const [dupToast, setDupToast] = useState<{ id: number } | null>(null);
@@ -321,13 +301,6 @@ export function CanvasPanel({
     startOffset: number;
     endOffset: number;
   } | null>(null);
-  const [textAsk, setTextAsk] = useState<{
-    nodeId: string;
-    selectedText: string;
-    startOffset: number;
-    endOffset: number;
-  } | null>(null);
-  const [askOpen, setAskOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState<{ nodeIds: string[]; initialQuery?: string } | null>(null);
   const [marquee, setMarquee] = useState<{
     startScreen: { x: number; y: number };
@@ -749,6 +722,72 @@ export function CanvasPanel({
     return true;
   }
 
+  /**
+   * Open the unified AI Palette for the current canvas selection (nodes
+   * and/or edges). The selection's resolved Markdown context is passed in
+   * as the palette's selection text; the first selected node is used as the
+   * auto-link anchor so the streamed answer becomes a connected node.
+   */
+  async function openAiPaletteForSelectedCanvas() {
+    try {
+      const context = await buildCanvasAskContext({
+        nodeIds: selectedNodeIds,
+        edgeIds: selectedEdgeIds,
+      });
+      const firstNodeId = selectedNodeIds[0];
+      const origin = firstNodeId ? `canvas-node:${firstNodeId}` : null;
+      // Separate the user-visible label from the LLM-internal source
+      // dump. The previous behavior pasted the whole "Use the
+      // following local Markdown files…" block as if it were the user's
+      // selection, which (a) cluttered the palette UI and (b) leaked
+      // the system-prompt scaffolding back to the user. The summary
+      // here is just enough context for the user to know what's
+      // attached; the verbose markdown/edge data still reaches the
+      // model as a `system` message via `systemContext`.
+      const summary = context.summary;
+      const titlePreview = summary.fileNames.slice(0, 3).join(', ');
+      const lines: string[] = [];
+      if (summary.fileCount > 0) {
+        lines.push(
+          `${summary.fileCount} note${summary.fileCount === 1 ? '' : 's'}` +
+            (titlePreview ? `: ${titlePreview}` : ''),
+        );
+      }
+      if (summary.edgeCount > 0) {
+        lines.push(
+          `${summary.edgeCount} link${summary.edgeCount === 1 ? '' : 's'}`,
+        );
+      }
+      const userVisible = lines.length
+        ? lines.join(' · ')
+        : 'Selected canvas context';
+      useStore
+        .getState()
+        .openAiPalette(userVisible, origin, context.systemContext);
+    } catch (err) {
+      console.error('[mc:ask] openAiPaletteForSelectedCanvas failed', err);
+    }
+  }
+
+  function addNodeAt(screenX: number, screenY: number) {
+    if (showGlobal) return;
+    const targetConv = conversationId ?? ensureConversation();
+    if (!targetConv) return;
+    const position = flow.screenToFlowPosition({ x: screenX, y: screenY });
+    const size = defaultMarkdownNodeSize('');
+    const node = addNode({
+      conversationId: targetConv,
+      kind: 'markdown',
+      title: '',
+      contentMarkdown: '',
+      position,
+      width: size.width,
+      height: size.height,
+      tags: [],
+    });
+    setEditingNode(node.id);
+  }
+
   function getSelectionOffsets(container: HTMLElement, range: Range) {
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     let offset = 0;
@@ -772,16 +811,36 @@ export function CanvasPanel({
   function onCanvasContextMenu(e: MouseEvent<HTMLElement>) {
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim() ?? '';
-    if (!selection || selection.rangeCount === 0 || !selectedText) return;
+    if (!selection || selection.rangeCount === 0 || !selectedText) {
+      console.debug('[mc:ask] context-menu skipped — no text selection');
+      return;
+    }
     const target = e.target as HTMLElement;
     const content = target.closest<HTMLElement>('.markdown-node-content');
     const nodeId = content?.dataset.nodeId;
-    if (!content || !nodeId || !content.contains(selection.anchorNode)) return;
+    if (!content || !nodeId || !content.contains(selection.anchorNode)) {
+      console.debug('[mc:ask] context-menu skipped — selection not inside a markdown node', {
+        hasContent: !!content,
+        nodeId,
+        anchorInside: content ? content.contains(selection.anchorNode) : false,
+      });
+      return;
+    }
     const range = selection.getRangeAt(0);
     const offsets = getSelectionOffsets(content, range);
-    if (!offsets) return;
+    if (!offsets) {
+      console.debug('[mc:ask] context-menu skipped — could not compute offsets');
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
+    console.debug('[mc:ask] text-selection menu opened', {
+      nodeId,
+      selectedText: selectedText.slice(0, 80),
+      length: selectedText.length,
+      startOffset: offsets.startOffset,
+      endOffset: offsets.endOffset,
+    });
     setTextSelectionMenu({
       x: e.clientX,
       y: e.clientY,
@@ -832,145 +891,6 @@ export function CanvasPanel({
     }
   }
 
-  async function askAboutTextSelection(input: {
-    nodeId: string;
-    selectedText: string;
-    startOffset: number;
-    endOffset: number;
-    question: string;
-  }) {
-    const state = useStore.getState();
-    const sourceNode = state.nodes.find((node) => node.id === input.nodeId);
-    if (!sourceNode) throw new Error('Source node not found');
-    const conversationId = state.settings.lastConversationId ?? ensureConversation();
-    const rootPath = await resolveMarkdownRoot(state.settings.markdownStorageDir);
-    const sourceMdPath = await ensureNodeMarkdownPath(rootPath, sourceNode.id);
-    const sourceMarkdownContent = sourceMdPath
-      ? await markdownFiles.readFile(rootPath, sourceMdPath)
-      : sourceNode.contentMarkdown;
-    const connected = state.edges
-      .filter((edge) => edge.sourceNodeId === sourceNode.id || edge.targetNodeId === sourceNode.id)
-      .slice(0, 8)
-      .map((edge) => {
-        const otherId = edge.sourceNodeId === sourceNode.id ? edge.targetNodeId : edge.sourceNodeId;
-        const other = state.nodes.find((node) => node.id === otherId);
-        return other ? `${other.title}: ${plainTextForContext(other.contentMarkdown).slice(0, 220)}` : null;
-      })
-      .filter(Boolean) as string[];
-    const contextSummary = {
-      fileCount: sourceMdPath ? 1 : 0,
-      edgeCount: connected.length,
-      fileNames: [wikiTitle({ ...sourceNode, mdPath: sourceMdPath ?? sourceNode.mdPath })],
-    };
-
-    addMessage(conversationId, 'user', input.question, [], contextSummary);
-    const conv = state.conversations.find((c) => c.id === conversationId);
-    const model = conv?.modelOverride ?? state.settings.defaultModel;
-    let answer: string;
-    if (!model) {
-      answer = 'No AI provider is configured. Add one in Settings to generate an answer for this selection.';
-      addMessage(conversationId, 'system', '_(No AI provider configured. Add one in Settings to enable selection Ask.)_');
-    } else {
-      const systemContext = [
-        'You are answering a canvas-native research question about a selected Markdown passage.',
-        'Use the selected passage and local Markdown context. Keep the answer useful as a standalone Markdown note.',
-        '',
-        `Source node: ${sourceNode.title}`,
-        `Source path: ${sourceMdPath ?? '(not yet linked)'}`,
-        `Selection offsets: ${input.startOffset}-${input.endOffset}`,
-        '',
-        'Selected passage:',
-        input.selectedText,
-        '',
-        'Source Markdown:',
-        sourceMarkdownContent,
-        '',
-        'Connected node summaries:',
-        connected.length ? connected.map((line) => `- ${line}`).join('\n') : '- None',
-      ].join('\n');
-      const messagesForModel: ChatMessage[] = [];
-      const sysPrompt = conv?.systemPrompt ?? state.settings.systemPrompt;
-      if (sysPrompt) messagesForModel.push({ role: 'system', content: sysPrompt });
-      messagesForModel.push({ role: 'system', content: systemContext });
-      messagesForModel.push({ role: 'user', content: input.question });
-      const meta = getModelMeta(model.provider, model.model);
-      const result = await chat.complete({
-        provider: model.provider,
-        model: model.model,
-        messages: messagesForModel,
-        thinking: conv?.thinking?.enabled && meta?.capabilities?.includes('thinking') ? conv.thinking : undefined,
-        reasoningEffort: meta?.capabilities?.includes('reasoning_effort') ? conv?.reasoningEffort : undefined,
-        conversationId,
-      });
-      answer = result.text.trim() || '(No answer returned.)';
-      if (result.usage) addUsage(conversationId, result.usage);
-    }
-    const assistantMessage = addMessage(conversationId, 'assistant', answer);
-    const sourcePosition = sourceNode.position;
-    const answerSize = { width: 320, height: 220 };
-    const preferredPosition = {
-      x: sourcePosition.x + (sourceNode.width ?? 280) + 80,
-      y: sourcePosition.y,
-    };
-    const obstacles: Rect[] = state.nodes.map((node) => ({
-      x: node.position.x,
-      y: node.position.y,
-      width: node.width ?? 280,
-      height: node.height ?? 160,
-    }));
-    const placedPosition = findFreeNodePosition(
-      preferredPosition,
-      answerSize,
-      obstacles,
-    );
-    const answerNode = addNode({
-      conversationId,
-      kind: 'markdown',
-      title: titleFromAnswer(input.question),
-      contentMarkdown: answer,
-      sourceMessageId: assistantMessage.id,
-      position: placedPosition,
-      width: answerSize.width,
-      height: answerSize.height,
-      tags: ['answer', 'selection-ask'],
-    });
-    const answerPath = await ensureNodeMarkdownPath(rootPath, answerNode.id);
-    const latestAnswer = useStore.getState().nodes.find((node) => node.id === answerNode.id) ?? answerNode;
-    const latestSource = useStore.getState().nodes.find((node) => node.id === sourceNode.id) ?? sourceNode;
-    const edge = addEdge({ sourceNodeId: sourceNode.id, targetNodeId: answerNode.id, label: 'asked' });
-    await syncWikiLinkBetweenNodes(
-      rootPath,
-      { ...latestSource, mdPath: sourceMdPath ?? latestSource.mdPath },
-      { ...latestAnswer, mdPath: answerPath ?? latestAnswer.mdPath },
-    );
-    const marker = {
-      markerId: newId(),
-      sourceNodeId: sourceNode.id,
-      ...(sourceMdPath ? { sourceMdPath } : {}),
-      selectedText: input.selectedText,
-      startOffset: input.startOffset,
-      endOffset: input.endOffset,
-      answerNodeId: answerNode.id,
-      question: input.question,
-      createdAt: now(),
-    };
-    const markers = latestSource.selectionMarkers ?? [];
-    const duplicate = markers.some(
-      (m) =>
-        m.startOffset === marker.startOffset &&
-        m.endOffset === marker.endOffset &&
-        m.question === marker.question,
-    );
-    if (!duplicate) {
-      updateNode(sourceNode.id, {
-        selectionMarkers: [...markers, marker],
-        ...(sourceMdPath ? { mdPath: sourceMdPath } : {}),
-      });
-    }
-    setCanvasSelection([sourceNode.id, answerNode.id], [edge.id]);
-    flow.setCenter(answerNode.position.x, answerNode.position.y, { zoom: 1, duration: 300 });
-  }
-
   // Double-click in global mode: select all nodes in the same conversation /
   // project so they can be dragged as a group.
   const onNodeDoubleClick: NodeMouseHandler = (_e, node) => {
@@ -988,9 +908,7 @@ export function CanvasPanel({
     const ids = storeNodes
       .filter((n) => groupConvIds.has(n.conversationId))
       .map((n) => n.id);
-    flow.setNodes((rfNodes) =>
-      rfNodes.map((rn) => ({ ...rn, selected: ids.includes(rn.id) })),
-    );
+    setCanvasSelection(ids, selectEdgesForNodes(storeEdges, ids));
   };
 
   function findCanvasNodeIdAtPoint(clientX: number, clientY: number): string | null {
@@ -1262,6 +1180,62 @@ export function CanvasPanel({
     return () => window.removeEventListener('mc:focus-canvas-node', onFocusCanvasNode);
   }, [flow]);
 
+  // Theme/project-root double-click → bulk select the connected component:
+  // the root itself, every node reachable through incident edges, every
+  // node whose `themeId` points at the root (legacy / non-edge clusters),
+  // and every edge whose endpoints both sit inside the selected group.
+  useEffect(() => {
+    function onSelectThemeCluster(e: Event) {
+      const themeRootId = (e as CustomEvent<{ themeRootId?: string }>).detail
+        ?.themeRootId;
+      if (!themeRootId) return;
+      const state = useStore.getState();
+      const root = state.nodes.find((n) => n.id === themeRootId);
+      if (!root) return;
+      const connected = new Map<string, string[]>();
+      for (const e2 of state.edges) {
+        const fromSource = connected.get(e2.sourceNodeId) ?? [];
+        fromSource.push(e2.targetNodeId);
+        connected.set(e2.sourceNodeId, fromSource);
+        const fromTarget = connected.get(e2.targetNodeId) ?? [];
+        fromTarget.push(e2.sourceNodeId);
+        connected.set(e2.targetNodeId, fromTarget);
+      }
+      const clusterNodeIds = new Set<string>([root.id]);
+      const queue: string[] = [root.id];
+      while (queue.length > 0) {
+        const cur = queue.shift() as string;
+        for (const child of connected.get(cur) ?? []) {
+          if (clusterNodeIds.has(child)) continue;
+          clusterNodeIds.add(child);
+          queue.push(child);
+        }
+      }
+      // Defensive sweep: pick up nodes that were tagged with this theme
+      // root id directly even if no parent edge connects them (e.g. broken
+      // imports, manual user edits).
+      for (const n of state.nodes) {
+        if (n.themeId === root.id) clusterNodeIds.add(n.id);
+      }
+      const clusterEdgeIds: string[] = [];
+      for (const e2 of state.edges) {
+        if (
+          clusterNodeIds.has(e2.sourceNodeId) &&
+          clusterNodeIds.has(e2.targetNodeId)
+        ) {
+          clusterEdgeIds.push(e2.id);
+        }
+      }
+      setCanvasSelection(Array.from(clusterNodeIds), clusterEdgeIds);
+    }
+    window.addEventListener('mc:select-theme-cluster', onSelectThemeCluster);
+    return () =>
+      window.removeEventListener(
+        'mc:select-theme-cluster',
+        onSelectThemeCluster,
+      );
+  }, [setCanvasSelection]);
+
   useEffect(() => {
     if (!dropTargetNodeId) return;
     const el = document.querySelector(
@@ -1282,7 +1256,9 @@ export function CanvasPanel({
 
   return (
     <main
-      className={`canvas-panel tool-${canvasTool}${dragOver ? ' dragging-over' : ''}`}
+      className={`canvas-panel tool-${canvasTool}${
+        dragOver ? ' dragging-over' : ''
+      }${viewMode === 'titles' ? ' canvas-titles-only' : ''}`}
       onPointerDownCapture={onCanvasPointerDown}
       onContextMenu={onCanvasContextMenu}
       onDragOver={onDragOver}
@@ -1301,14 +1277,31 @@ export function CanvasPanel({
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeContextMenu={(e, node) => {
           e.preventDefault();
+          // Stop the workspace-level context menu (App.tsx) from also
+          // firing — without this, even with our menu shown, the
+          // layout/show-hide menu can race in on top.
+          e.stopPropagation();
           if (selectedNodeIds.includes(node.id)) {
             selectedMenuAt(e.clientX, e.clientY);
           } else {
             setCtxMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
           }
         }}
+        onEdgeContextMenu={(e, edge) => {
+          // Right-click on an edge: if it's already in the selection,
+          // open the selection menu (which now offers "Delete Link").
+          // Otherwise replace the selection with just this edge first
+          // so the menu always reflects what the user clicked on.
+          e.preventDefault();
+          e.stopPropagation();
+          if (!selectedEdgeIds.includes(edge.id)) {
+            setCanvasSelection([], [edge.id]);
+          }
+          setSelectionMenu({ x: e.clientX, y: e.clientY });
+        }}
         onPaneContextMenu={(e) => {
           e.preventDefault();
+          e.stopPropagation();
           if (selectedMenuAt(e.clientX, e.clientY)) return;
           setPaneMenu({ x: e.clientX, y: e.clientY });
         }}
@@ -1361,7 +1354,7 @@ export function CanvasPanel({
           edgeCount={selectedEdgeIds.length}
           onAsk={() => {
             setSelectionMenu(null);
-            setAskOpen(true);
+            void openAiPaletteForSelectedCanvas();
           }}
           onSearch={() => {
             setSelectionMenu(null);
@@ -1379,6 +1372,15 @@ export function CanvasPanel({
             setSelectionMenu(null);
             linkSelectedNotes();
           }}
+          onDeleteEdges={() => {
+            setSelectionMenu(null);
+            const ids = [...selectedEdgeIds];
+            for (const id of ids) removeEdge(id);
+            // Drop the now-stale edges from the selection so the menu
+            // closes cleanly. Nodes stay selected so the user can keep
+            // operating on them.
+            setCanvasSelection(selectedNodeIds, []);
+          }}
           onClear={() => {
             setSelectionMenu(null);
             clearCanvasSelection();
@@ -1390,12 +1392,18 @@ export function CanvasPanel({
         <TextSelectionContextMenu
           state={textSelectionMenu}
           onAsk={() => {
-            setTextAsk({
-              nodeId: textSelectionMenu.nodeId,
-              selectedText: textSelectionMenu.selectedText,
-              startOffset: textSelectionMenu.startOffset,
-              endOffset: textSelectionMenu.endOffset,
+            // Route into the unified AI palette; palette auto-creates
+            // the answer node + edge + selection marker on stream
+            // completion (see parseCanvasSelectionOrigin in AIPalette.tsx).
+            const origin = `canvas-selection:${textSelectionMenu.nodeId}:${textSelectionMenu.startOffset}:${textSelectionMenu.endOffset}`;
+            console.debug('[mc:ask] Ask clicked → openAiPalette', {
+              origin,
+              selectionLength: textSelectionMenu.selectedText.length,
             });
+            useStore.getState().openAiPalette(
+              textSelectionMenu.selectedText,
+              origin,
+            );
             setTextSelectionMenu(null);
           }}
           onSearch={() => {
@@ -1415,37 +1423,6 @@ export function CanvasPanel({
             setTextSelectionMenu(null);
           }}
           onClose={() => setTextSelectionMenu(null)}
-        />
-      ) : null}
-      {askOpen ? (
-        <AskSelectedModal
-          nodeIds={selectedNodeIds}
-          edgeIds={selectedEdgeIds}
-          onClose={() => setAskOpen(false)}
-          onAsk={async (question) => {
-            const context = await buildCanvasAskContext({
-              nodeIds: selectedNodeIds,
-              edgeIds: selectedEdgeIds,
-            });
-            setActiveRightTab('chat');
-            window.dispatchEvent(
-              new CustomEvent('mc:layout-action', { detail: { action: 'show-chat' } }),
-            );
-            await send(question, 'chat', [], {
-              systemContext: context.systemContext,
-              contextSummary: context.summary,
-            });
-          }}
-        />
-      ) : null}
-      {textAsk ? (
-        <AskAboutSelectionModal
-          selectedText={textAsk.selectedText}
-          onClose={() => setTextAsk(null)}
-          onAsk={async (question) => {
-            await askAboutTextSelection({ ...textAsk, question });
-            setTextAsk(null);
-          }}
         />
       ) : null}
       {searchOpen ? (
@@ -1471,10 +1448,12 @@ export function CanvasPanel({
           canvasTool={canvasTool}
           hasSelection={selectedNodeIds.length > 0}
           hasNodes={rfNodes.length > 0}
+          canAddNode={!showGlobal}
           onShowCanvas={onShowCanvas}
           onHideCanvas={onHideCanvas}
           onShowChat={onShowChat}
           onHideChat={onHideChat}
+          onAddNode={() => addNodeAt(paneMenu.x, paneMenu.y)}
           onResetView={resetCanvasView}
           onFitView={fitCanvasView}
           onFitToCanvas={fitToCanvasEdges}
@@ -1737,6 +1716,7 @@ function SelectionContextMenu({
   onOpenMarkdown,
   onCopyLinks,
   onAddLinks,
+  onDeleteEdges,
   onClear,
   onClose,
 }: {
@@ -1749,10 +1729,16 @@ function SelectionContextMenu({
   onOpenMarkdown: () => void;
   onCopyLinks: () => void;
   onAddLinks: () => void;
+  onDeleteEdges: () => void;
   onClear: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Measured clamp — the menu's actual bounding rect is read after
+  // mount and the position is shifted (or flipped) so the menu always
+  // fits inside the viewport, regardless of how tall it gets after
+  // its Panes section / Delete Link rows are added.
+  const pos = useClampedMenuPosition(ref, x, y);
   useEffect(() => {
     // pointerdown/capture: the canvas marquee handler preventDefault()'s
     // pointerdown, which suppresses mousedown on the empty pane.
@@ -1770,10 +1756,12 @@ function SelectionContextMenu({
       document.removeEventListener('keydown', onEsc);
     };
   }, [onClose]);
-  const left = Math.min(x, window.innerWidth - 240);
-  const top = Math.min(y, window.innerHeight - 300);
   return (
-    <div className="node-context-menu" ref={ref} style={{ left, top }}>
+    <div
+      className="node-context-menu"
+      ref={ref}
+      style={{ left: pos.x, top: pos.y }}
+    >
       <div className="selection-menu-title">
         {nodeCount} notes, {edgeCount} links
       </div>
@@ -1786,6 +1774,69 @@ function SelectionContextMenu({
           Add Link Between Selected Notes
         </button>
       ) : null}
+      {edgeCount >= 1 ? (
+        <button type="button" className="danger" onClick={onDeleteEdges}>
+          {edgeCount === 1 ? 'Delete Link' : `Delete ${edgeCount} Links`}
+        </button>
+      ) : null}
+      <hr />
+      <div className="selection-menu-title">Panes</div>
+      {/* Panel toggles. The right-click on an edge/node now wins over
+          the workspace show/hide menu, but users still want to flip
+          panels without dropping the selection — these forward to the
+          existing `mc:layout-action` toggles in App.tsx. */}
+      <button
+        type="button"
+        onClick={() => {
+          window.dispatchEvent(
+            new CustomEvent('mc:layout-action', {
+              detail: { action: 'toggle-sidebar' },
+            }),
+          );
+          onClose();
+        }}
+      >
+        Toggle Sidebar
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          window.dispatchEvent(
+            new CustomEvent('mc:layout-action', {
+              detail: { action: 'toggle-markdown' },
+            }),
+          );
+          onClose();
+        }}
+      >
+        Toggle Markdown Editor
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          window.dispatchEvent(
+            new CustomEvent('mc:layout-action', {
+              detail: { action: 'toggle-canvas' },
+            }),
+          );
+          onClose();
+        }}
+      >
+        Toggle Canvas
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          window.dispatchEvent(
+            new CustomEvent('mc:layout-action', {
+              detail: { action: 'toggle-chat' },
+            }),
+          );
+          onClose();
+        }}
+      >
+        Toggle Chat
+      </button>
       <hr />
       <button type="button" onClick={onClear}>Clear Selection</button>
     </div>
@@ -1808,6 +1859,7 @@ function TextSelectionContextMenu({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const pos = useClampedMenuPosition(ref, state.x, state.y);
   useEffect(() => {
     // pointerdown/capture: the canvas marquee handler preventDefault()'s
     // pointerdown, which suppresses mousedown on the empty pane.
@@ -1829,164 +1881,13 @@ function TextSelectionContextMenu({
     <div
       className="node-context-menu"
       ref={ref}
-      style={{
-        left: Math.min(state.x, window.innerWidth - 240),
-        top: Math.min(state.y, window.innerHeight - 220),
-      }}
+      style={{ left: pos.x, top: pos.y }}
     >
       <div className="selection-menu-title">Selected passage</div>
       <button type="button" onClick={onAsk}>Ask</button>
       <button type="button" onClick={onSearch}>Search</button>
       <button type="button" onClick={onCopy}>Copy</button>
       <button type="button" onClick={onOpenMarkdown}>Open Markdown</button>
-    </div>
-  );
-}
-
-function AskAboutSelectionModal({
-  selectedText,
-  onAsk,
-  onClose,
-}: {
-  selectedText: string;
-  onAsk: (question: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [question, setQuestion] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  async function submit() {
-    const trimmed = question.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await onAsk(trimmed);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="canvas-modal-backdrop">
-      <div className="canvas-modal">
-        <header>
-          <div>
-            <h2>Ask about selection</h2>
-            <p>Creates a linked answer note on the canvas.</p>
-          </div>
-          <button
-            type="button"
-            className="canvas-modal-close"
-            onClick={onClose}
-            aria-label="Close"
-            title="Close"
-          >
-            ×
-          </button>
-        </header>
-        <blockquote className="ask-selection-preview">
-          {selectedText.length > 500 ? `${selectedText.slice(0, 500)}...` : selectedText}
-        </blockquote>
-        <textarea
-          autoFocus
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask a question about this passage..."
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              onClose();
-              return;
-            }
-            if (e.key === 'Enter' && e.shiftKey) return;
-            if (
-              e.key === 'Enter' &&
-              !e.nativeEvent.isComposing &&
-              e.keyCode !== 229
-            ) {
-              e.preventDefault();
-              void submit();
-            }
-          }}
-        />
-        {busy ? <div className="canvas-modal-hint muted">Asking…</div> : null}
-        {error ? <div className="canvas-modal-error">{error}</div> : null}
-      </div>
-    </div>
-  );
-}
-
-function AskSelectedModal({
-  nodeIds,
-  edgeIds,
-  onAsk,
-  onClose,
-}: {
-  nodeIds: string[];
-  edgeIds: string[];
-  onAsk: (question: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [question, setQuestion] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  async function submit() {
-    const trimmed = question.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await onAsk(trimmed);
-      onClose();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="canvas-modal-backdrop">
-      <div className="canvas-modal">
-        <header>
-          <div>
-            <h2>Ask selected context</h2>
-            <p>{nodeIds.length} notes, {edgeIds.length} links selected</p>
-          </div>
-          <button
-            type="button"
-            className="canvas-modal-close"
-            onClick={onClose}
-            aria-label="Close"
-            title="Close"
-          >
-            ×
-          </button>
-        </header>
-        <textarea
-          autoFocus
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask a question about the selected notes..."
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              onClose();
-              return;
-            }
-            if (e.key === 'Enter' && e.shiftKey) return;
-            if (
-              e.key === 'Enter' &&
-              !e.nativeEvent.isComposing &&
-              e.keyCode !== 229
-            ) {
-              e.preventDefault();
-              void submit();
-            }
-          }}
-        />
-        {busy ? <div className="canvas-modal-hint muted">Asking…</div> : null}
-        {error ? <div className="canvas-modal-error">{error}</div> : null}
-      </div>
     </div>
   );
 }

@@ -6,9 +6,10 @@ import {
   mkdir,
   readFile,
   remove,
+  rename,
   writeFile,
 } from '@tauri-apps/plugin-fs';
-import type { Attachment } from '../../types';
+import type { Attachment, AttachmentStorageRoot } from '../../types';
 import type { AttachmentService, IngestSource } from './AttachmentService';
 import { useStore } from '../../store';
 import {
@@ -124,26 +125,28 @@ async function uniqueTargetName(
   }
 }
 
-async function mirrorRawAttachmentToKnowledgeBase(
-  att: Attachment,
-  absPath: string,
-  conversationId: string | undefined,
-  displayName: string,
-): Promise<void> {
-  try {
-    const state = useStore.getState();
-    if (state.settings.incognitoUnprojectedChats) {
-      // The user opted out of mirroring unprojected chats; respect that.
-      const convId = conversationId ?? state.settings.lastConversationId;
-      const conv = convId
-        ? state.conversations.find((c) => c.id === convId)
-        : undefined;
-      if (!conv?.projectId) return;
+type IngestTarget =
+  | { kind: 'vault'; rootPath: string; rawDir: string }
+  | { kind: 'appData' };
+
+// Decide whether a fresh attachment should land in the user's vault (the
+// new canonical store) or fall back to the legacy `appData/attachments/`
+// path. The only reason to choose appData is the explicit "incognito
+// unprojected chats" opt-out — everything else is vault-canonical.
+async function decideIngestTarget(source: IngestSource): Promise<IngestTarget> {
+  const state = useStore.getState();
+  const convId = source.conversationId ?? state.settings.lastConversationId;
+  const conv = convId
+    ? state.conversations.find((c) => c.id === convId)
+    : undefined;
+
+  if (state.settings.incognitoUnprojectedChats && !source.forceRawMirror) {
+    if (!conv?.projectId) {
+      return { kind: 'appData' };
     }
-    const convId = conversationId ?? state.settings.lastConversationId;
-    const conv = convId
-      ? state.conversations.find((c) => c.id === convId)
-      : undefined;
+  }
+
+  try {
     const project = conv?.projectId
       ? state.projects.find((p) => p.id === conv.projectId)
       : undefined;
@@ -152,14 +155,32 @@ async function mirrorRawAttachmentToKnowledgeBase(
       ? `${projectBasePath(project)}/${PROJECT_RAW_DIR}`
       : ROOT_RAW_DIR;
     await ensureFolderPath(rootPath, rawDir);
-    const ext = extFromName(displayName) || extFromName(att.filename) || 'bin';
-    const safe = safeFilename(displayName || att.filename, ext);
-    const finalName = await uniqueTargetName(rootPath, rawDir, safe);
-    const target = await absoluteMarkdownPath(rootPath, `${rawDir}/${finalName}`);
-    await copyFile(absPath, target);
+    return { kind: 'vault', rootPath, rawDir };
   } catch (err) {
-    console.warn('raw attachment mirror failed', err);
+    // Vault unreachable (folder removed, permissions, …). Fall back so the
+    // ingest still succeeds; the record will be tagged `appData` and read
+    // path stays consistent.
+    console.warn(
+      'attachment ingest: vault target unavailable, falling back to appData',
+      err,
+    );
+    return { kind: 'appData' };
   }
+}
+
+async function atomicWriteFromSource(
+  target: string,
+  source: IngestSource,
+): Promise<number> {
+  const tmp = `${target}.tmp`;
+  if (source.kind === 'path') {
+    await copyFile(source.path, tmp);
+  } else {
+    await writeFile(tmp, source.bytes);
+  }
+  await rename(tmp, target);
+  const buf = await readFile(target);
+  return buf.byteLength;
 }
 
 export class TauriAttachmentService implements AttachmentService {
@@ -175,21 +196,96 @@ export class TauriAttachmentService implements AttachmentService {
     return dir;
   }
 
+  // Single point of resolution: every read API delegates here so the
+  // `storageRoot` discriminator is honored consistently.
+  private async resolvePath(att: Attachment): Promise<string> {
+    const root: AttachmentStorageRoot = att.storageRoot ?? 'appData';
+    switch (root) {
+      case 'vault': {
+        const rootPath = await resolveMarkdownRoot(
+          useStore.getState().settings.markdownStorageDir,
+        );
+        return absoluteMarkdownPath(rootPath, att.relPath);
+      }
+      case 'appData': {
+        const baseDir = await this.baseDir();
+        return join(baseDir, att.relPath);
+      }
+      case 'external':
+        throw new Error(
+          'attachment storageRoot "external" is not supported yet',
+        );
+    }
+  }
+
   async ingest(source: IngestSource): Promise<Attachment> {
+    const target = await decideIngestTarget(source);
+    const id = nano(16);
+
+    const rawSuggested =
+      source.kind === 'path'
+        ? source.suggestedName ?? source.path.split(/[\\/]/).pop() ?? 'file'
+        : source.suggestedName;
+
+    if (target.kind === 'vault') {
+      const ext =
+        extFromName(rawSuggested) ||
+        (source.kind === 'bytes' ? source.mimeType.split('/')[1] : '') ||
+        'bin';
+      const mimeType =
+        source.kind === 'bytes' ? source.mimeType : mimeFromExt(ext);
+      const safe = safeFilename(rawSuggested || `untitled.${ext}`, ext);
+      const finalName = await uniqueTargetName(
+        target.rootPath,
+        target.rawDir,
+        safe,
+      );
+      const relPath = `${target.rawDir}/${finalName}`;
+      const absPath = await absoluteMarkdownPath(target.rootPath, relPath);
+      const bytes = await atomicWriteFromSource(absPath, source);
+
+      const att: Attachment = {
+        id,
+        kind: kindFromMime(mimeType),
+        filename: finalName,
+        storageRoot: 'vault',
+        relPath,
+        mimeType,
+        bytes,
+        createdAt: new Date().toISOString(),
+      };
+
+      if (att.kind === 'image') {
+        try {
+          const url = convertFileSrc(absPath);
+          const dim = await readImageDimensions(url);
+          if (dim) {
+            att.width = dim.width;
+            att.height = dim.height;
+          }
+        } catch {
+          // best-effort
+        }
+      }
+
+      return att;
+    }
+
+    // Legacy appData path — preserved for the incognito-unprojected opt-out
+    // and as a hard fallback when the vault root is unreachable. Records
+    // written here keep the historical `attachments/YYYY-MM/<nanoid>.<ext>`
+    // layout so a follow-up migration PR can find them.
     const baseDir = await this.baseDir();
     const bucket = monthBucket();
     const bucketDir = await join(baseDir, ATTACH_DIR, bucket);
     if (!(await exists(bucketDir))) await mkdir(bucketDir, { recursive: true });
 
-    const id = nano(16);
     let mimeType: string;
     let bytes: number;
     let absPath: string;
 
     if (source.kind === 'path') {
-      const suggestedName =
-        source.suggestedName ?? source.path.split(/[\\/]/).pop() ?? 'file';
-      const ext = extFromName(suggestedName);
+      const ext = extFromName(rawSuggested);
       mimeType = mimeFromExt(ext);
       const filename = `${id}.${ext}`;
       absPath = await join(bucketDir, filename);
@@ -198,30 +294,23 @@ export class TauriAttachmentService implements AttachmentService {
       bytes = buf.byteLength;
     } else {
       mimeType = source.mimeType;
-      const ext = extFromName(source.suggestedName) || mimeType.split('/')[1] || 'bin';
+      const ext =
+        extFromName(source.suggestedName) || mimeType.split('/')[1] || 'bin';
       const filename = `${id}.${ext}`;
       absPath = await join(bucketDir, filename);
       await writeFile(absPath, source.bytes);
       bytes = source.bytes.byteLength;
     }
 
-    // Storage filename — `<nanoid>.<ext>` — used to dedupe on disk and
-    // never shown to the user. The Attachment's `filename` property is
-    // the *display* name (the original suggested filename, sanitized) so
-    // chat artifact cards, canvas nodes, and wikilinks read meaningfully
-    // instead of showing a random hex string.
     const storageName = absPath.split(/[\\/]/).pop() ?? `${id}.bin`;
     const relPath = `${ATTACH_DIR}/${bucket}/${storageName}`;
-    const rawSuggested =
-      source.kind === 'path'
-        ? source.suggestedName ?? source.path.split(/[\\/]/).pop() ?? storageName
-        : source.suggestedName;
     const ext = extFromName(rawSuggested) || extFromName(storageName) || 'bin';
     const displayFilename = safeFilename(rawSuggested || storageName, ext);
     const att: Attachment = {
       id,
       kind: kindFromMime(mimeType),
       filename: displayFilename,
+      storageRoot: 'appData',
       relPath,
       mimeType,
       bytes,
@@ -241,38 +330,27 @@ export class TauriAttachmentService implements AttachmentService {
       }
     }
 
-    void mirrorRawAttachmentToKnowledgeBase(
-      att,
-      absPath,
-      source.conversationId,
-      displayFilename,
-    );
-
     return att;
   }
 
   async removeByAttachment(att: Attachment): Promise<void> {
-    const baseDir = await this.baseDir();
-    const path = await join(baseDir, att.relPath);
+    const path = await this.resolvePath(att);
     if (await exists(path)) {
       await remove(path);
     }
   }
 
   async toUrl(att: Attachment): Promise<string> {
-    const baseDir = await this.baseDir();
-    const path = await join(baseDir, att.relPath);
+    const path = await this.resolvePath(att);
     return convertFileSrc(path);
   }
 
   async resolveAbsolutePath(att: Attachment): Promise<string> {
-    const baseDir = await this.baseDir();
-    return join(baseDir, att.relPath);
+    return this.resolvePath(att);
   }
 
   async readBytes(att: Attachment): Promise<Uint8Array> {
-    const baseDir = await this.baseDir();
-    const path = await join(baseDir, att.relPath);
+    const path = await this.resolvePath(att);
     const buf = await readFile(path);
     return buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   }

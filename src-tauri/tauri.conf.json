@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Memory Canvas",
+  "productName": "Hypratia",
   "version": "1.1.0-beta.1",
   "identifier": "com.bakerization.memory-canvas",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Memory Canvas",
+        "title": "Hypratia",
         "width": 1280,
         "height": 800,
         "minWidth": 720,
@@ -42,7 +42,7 @@
     ],
     "category": "Productivity",
     "shortDescription": "Spatial memory layer for LLM conversations",
-    "longDescription": "Local-first AI thinking workspace: streaming chat on the right, infinite spatial canvas on the left, exports cleanly to Obsidian.",
+    "longDescription": "Hypratia is a local-first AI thinking workspace: streaming chat on the right, infinite spatial canvas on the left, project knowledge, PDF reading, and clean Markdown export.",
     "macOS": {
       "minimumSystemVersion": "11.0",
       "entitlements": null,

@@ -11,6 +11,13 @@ import {
   resetAllKnowledgeBase,
   resetProjectKnowledgeBase,
 } from '../../services/knowledge/resetKnowledgeBase';
+import {
+  resetMirrorState,
+  syncConversationMirror,
+} from '../../services/knowledge/conversationMarkdownMirror';
+import { rebuildProjectKnowledge } from '../../services/knowledge/projectRetrieval';
+import { resolveMarkdownRoot } from '../../services/storage/MarkdownFileService';
+import { openRelationshipTreeWindow } from '../../services/window';
 import type { Command } from './CommandRegistry';
 
 export function useCommands(): Command[] {
@@ -168,6 +175,43 @@ export function useCommands(): Command[] {
         shortcut: '⌘G',
         match: 'mod+g',
         run: () => setViewMode(viewMode === 'global' ? 'current' : 'global'),
+      },
+      {
+        id: 'canvas.undo',
+        title: 'Undo last canvas delete',
+        section: 'Canvas',
+        shortcut: '⌘Z',
+        match: 'mod+z',
+        // The keymap automatically lets Cmd-Z reach inputs / textareas /
+        // contenteditables (native text undo wins there). On the canvas
+        // surface, Cmd-Z restores the last deleted node or edge from
+        // the in-memory ring buffer (cap 10). See store `undoStack`.
+        when: () => useStore.getState().undoStack.length > 0,
+        run: () => {
+          useStore.getState().undoCanvasDelete();
+        },
+      },
+      {
+        id: 'canvas.titles-only',
+        title:
+          viewMode === 'titles'
+            ? 'Exit Titles view (back to Current Map)'
+            : 'Show Titles only (compact map view)',
+        section: 'Canvas',
+        run: () => setViewMode(viewMode === 'titles' ? 'current' : 'titles'),
+      },
+      {
+        id: 'canvas.open-tree-window',
+        title: 'Open Title Tree Window (Relationship Tree)',
+        section: 'Canvas',
+        run: () => {
+          // The tree window mirrors the active conversation. It picks
+          // up `lastConversationId` on its own through the broadcast
+          // store-sync, but passing the chatId here keeps the URL
+          // self-describing for debugging / reload.
+          const id = lastConversationId;
+          void openRelationshipTreeWindow(id);
+        },
       },
       {
         id: 'canvas.tool.select',
@@ -400,6 +444,201 @@ export function useCommands(): Command[] {
           : 'Incognito: stop saving unprojected chats to Knowledge Base',
         section: 'File',
         run: () => setIncognitoUnprojectedChats(!incognitoUnprojectedChats),
+      },
+      {
+        id: 'file.rebuild-project-knowledge',
+        title: (() => {
+          const conv = lastConversationId
+            ? conversations.find((c) => c.id === lastConversationId)
+            : undefined;
+          const projectId = conv?.projectId ?? null;
+          const project = projectId
+            ? useStore.getState().projects.find((p) => p.id === projectId)
+            : null;
+          return project
+            ? `Rebuild project knowledge index — "${project.name}"`
+            : 'Rebuild knowledge index — default workspace';
+        })(),
+        section: 'File',
+        run: async () => {
+          // Force-rebuilds the project's `processed/` index from
+          // every file in `raw/`, bypassing the SHA-256 dedupe that
+          // the implicit chat-send rebuild relies on. Surfaces
+          // results through the existing `mc:knowledge-sync` toast
+          // pipeline so the user gets the same UX as conversation
+          // mirror feedback.
+          const tag = '[knowledge-rebuild]';
+          const conv = lastConversationId
+            ? conversations.find((c) => c.id === lastConversationId)
+            : undefined;
+          const projectId = conv?.projectId ?? null;
+          const project = projectId
+            ? useStore.getState().projects.find((p) => p.id === projectId)
+            : null;
+          const label = project
+            ? `project "${project.name}"`
+            : 'default workspace';
+          console.info(`${tag} starting force rebuild for ${label}`);
+          // Optimistic toast so the user has feedback while extraction
+          // grinds (PDF text extraction can take a few seconds for
+          // large documents).
+          window.dispatchEvent(
+            new CustomEvent('mc:knowledge-sync', {
+              detail: {
+                written: 0,
+                skipped: 0,
+                errors: [],
+                rebuildStarted: true,
+                rebuildLabel: label,
+              },
+            }),
+          );
+          try {
+            const result = await rebuildProjectKnowledge(project?.name, {
+              force: true,
+            });
+            console.info(`${tag} done`, result);
+            const errs = result.errors.length;
+            const summary = `Indexed ${result.scanned} file${
+              result.scanned === 1 ? '' : 's'
+            } (${result.processed} re-extracted, ${result.unchanged} unchanged${
+              result.deleted > 0 ? `, ${result.deleted} deleted` : ''
+            }${errs > 0 ? `, ${errs} error${errs === 1 ? '' : 's'}` : ''})`;
+            window.dispatchEvent(
+              new CustomEvent('mc:knowledge-sync', {
+                detail: {
+                  written: result.processed,
+                  skipped: result.unchanged,
+                  errors: result.errors.map((e) => ({
+                    conversationId: `knowledge:${e.sourcePath}`,
+                    reason: e.error,
+                  })),
+                  rebuildSummary: summary,
+                },
+              }),
+            );
+          } catch (err) {
+            console.error(`${tag} failed`, err);
+            window.dispatchEvent(
+              new CustomEvent('mc:knowledge-sync', {
+                detail: {
+                  error: `Rebuild failed: ${String(err)}`,
+                },
+              }),
+            );
+          }
+        },
+      },
+      {
+        id: 'file.diagnose-knowledge-base',
+        title: 'Diagnose Knowledge Base mirror',
+        section: 'File',
+        run: async () => {
+          // One-shot diagnostic: bypasses the in-memory dedupe, runs a
+          // full mirror sync, and dumps the resolved root path + per-
+          // conversation outcome to the devtools console under the
+          // `[knowledge-mirror-diagnose]` prefix. Surfaces the most
+          // common silent-failure cases:
+          //   1. `markdownStorageDir` unset → mirror went to appData.
+          //   2. ownership-check rejected an existing user-edited file.
+          //   3. fs write threw (permission / path outside the vault).
+          const tag = '[knowledge-mirror-diagnose]';
+          // Synchronous log BEFORE any await so we can tell from devtools
+          // whether the command-palette `run` callback even fires. If
+          // this never appears, the command isn't being dispatched —
+          // typical causes are HMR not having picked up the new code
+          // (do a hard reload) or the bundle not having been rebuilt.
+          console.info(`${tag} command dispatched`);
+          // Also surface a toast immediately so the user gets visible
+          // feedback even when the devtools window is closed.
+          window.dispatchEvent(
+            new CustomEvent('mc:knowledge-sync', {
+              detail: {
+                written: 0,
+                skipped: 0,
+                errors: [],
+                diagnoseStarted: true,
+              },
+            }),
+          );
+          const s = useStore.getState();
+          const configuredRoot = s.settings.markdownStorageDir;
+          let resolved = '';
+          try {
+            resolved = await resolveMarkdownRoot(configuredRoot);
+          } catch (err) {
+            console.error(`${tag} resolveMarkdownRoot threw:`, err);
+          }
+          console.group(`${tag} starting`);
+          console.info(
+            `${tag} configuredRoot=${configuredRoot ?? '<unset>'}`,
+          );
+          console.info(`${tag} resolvedRoot=${resolved}`);
+          console.info(
+            `${tag} counts: conversations=${s.conversations.length} messages=${s.messages.length} nodes=${s.nodes.length} edges=${s.edges.length} projects=${s.projects.length}`,
+          );
+          console.info(
+            `${tag} flags: incognitoUnprojectedChats=${s.settings.incognitoUnprojectedChats ?? false}`,
+          );
+          // Bypass the in-memory dedupe so every conversation is re-
+          // emitted even if signatures match. We do *not* delete files;
+          // the existing ownsFile check still protects user-authored
+          // notes that share a path with the mirror.
+          resetMirrorState();
+          let result;
+          try {
+            result = await syncConversationMirror({
+              conversations: s.conversations,
+              messages: s.messages,
+              nodes: s.nodes,
+              edges: s.edges,
+              projects: s.projects,
+              markdownStorageDir: configuredRoot,
+              incognitoUnprojectedChats: s.settings.incognitoUnprojectedChats,
+            });
+          } catch (err) {
+            console.error(`${tag} syncConversationMirror threw:`, err);
+            console.groupEnd();
+            window.dispatchEvent(
+              new CustomEvent('mc:knowledge-sync', {
+                detail: { error: `Diagnose failed: ${String(err)}` },
+              }),
+            );
+            return;
+          }
+          console.info(
+            `${tag} result: rootPath=${result.rootPath} written=${result.written} nodeWritten=${result.nodeWritten} edgesWritten=${result.edgesWritten} skipped=${result.skipped} incognitoSkipped=${result.incognitoSkipped} errors=${result.errors.length}`,
+          );
+          if (result.errors.length > 0) {
+            console.warn(`${tag} per-conversation issues:`);
+            for (const e of result.errors) {
+              console.warn(
+                `${tag} · conversationId=${e.conversationId} reason=${e.reason}`,
+              );
+            }
+          } else {
+            console.info(`${tag} no errors reported`);
+          }
+          console.groupEnd();
+          // Surface a structured summary toast so the user knows the
+          // command actually ran. Full details are in the console.
+          window.dispatchEvent(
+            new CustomEvent('mc:knowledge-sync', {
+              detail: {
+                written: result.written,
+                skipped: result.skipped,
+                errors: result.errors,
+                diagnose: {
+                  configuredRoot,
+                  resolvedRoot: result.rootPath,
+                  conversations: s.conversations.length,
+                  nodeWritten: result.nodeWritten,
+                  edgesWritten: result.edgesWritten,
+                },
+              },
+            }),
+          );
+        },
       },
       {
         id: 'file.reset-knowledge-base',

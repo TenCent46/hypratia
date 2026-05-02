@@ -1,5 +1,6 @@
 import { attachments as attachmentService } from '../attachments';
 import { useStore } from '../../store';
+import { generateContentTitle } from '../chat/autoTitle';
 import type { ID } from '../../types';
 import {
   audioMime,
@@ -146,7 +147,7 @@ export class ArtifactService {
     //   4. first non-empty meaningful line (clipped)
     // Falls back to the original filename when none of those produce
     // anything usable (extension is preserved in every case).
-    const finalFilename = retitleTextArtifact({
+    const finalFilename = await retitleTextArtifact({
       originalFilename: filename,
       extension,
       explicitTitle: req.title,
@@ -544,24 +545,53 @@ function formatBytes(n: number): string {
 
 /**
  * Derive a meaningful filename for a text artifact from its content.
- * Order: explicit title → frontmatter `title:` → first `# H1` →
- * first non-empty line. Always preserves the original extension. When
- * nothing meaningful can be extracted, returns the original filename.
+ *
+ * Order:
+ *   1. explicit `title` on the request
+ *   2. YAML frontmatter `title:`
+ *   3. first `# H1` heading
+ *   4. AI-generated title via the free Groq Llama / OpenAI mini path
+ *      (skipped silently when no provider is configured)
+ *   5. first non-empty meaningful line (clipped)
+ *
+ * Always preserves the original extension. Async because step 4 is a
+ * network call; the caller is already async so this adds no UI latency
+ * beyond the AI hop itself (typically <1s on Groq).
  */
-function retitleTextArtifact(args: {
+async function retitleTextArtifact(args: {
   originalFilename: string;
   extension: string;
   explicitTitle?: string;
   content: string;
-}): string {
-  const stem = pickStemFromContent(args);
-  if (!stem) return args.originalFilename;
-  const safe = sanitizeFilenameStem(stem);
-  if (!safe) return args.originalFilename;
-  return `${safe}.${args.extension}`;
+}): Promise<string> {
+  const strong = pickStrongStemFromContent(args);
+  if (strong) {
+    const safe = sanitizeFilenameStem(strong);
+    if (safe) return `${safe}.${args.extension}`;
+  }
+  // Try the AI as a stronger title source than first-line heuristic.
+  // Failure / unavailability falls through to the heuristic.
+  try {
+    const aiTitle = await generateContentTitle({
+      content: args.content,
+      kind: 'document',
+    });
+    const safe = sanitizeFilenameStem(aiTitle ?? '');
+    if (safe && safe.toLowerCase() !== 'untitled') {
+      return `${safe}.${args.extension}`;
+    }
+  } catch {
+    // ignored — fall through to heuristic
+  }
+  const heuristic = pickFirstLineStem(args.content);
+  if (heuristic) {
+    const safe = sanitizeFilenameStem(heuristic);
+    if (safe) return `${safe}.${args.extension}`;
+  }
+  return args.originalFilename;
 }
 
-function pickStemFromContent(args: {
+function pickStrongStemFromContent(args: {
   explicitTitle?: string;
   content: string;
 }): string | null {
@@ -585,6 +615,12 @@ function pickStemFromContent(args: {
       if (t.length > 0 && t.length <= 120) return t;
     }
   }
+  return null;
+}
+
+function pickFirstLineStem(content: string): string | null {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  const body = fmMatch ? content.slice(fmMatch[0].length) : content;
   for (const line of body.split('\n')) {
     const trimmed = line.trim().replace(/^[#>*\-_+\s]+/, '').trim();
     if (trimmed.length >= 3) return trimmed.slice(0, 80);

@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 // Bundle the pdf.js worker through Vite so its version always matches
 // the installed `pdfjs-dist`. Statically copying the worker into
@@ -6,6 +13,7 @@ import { Document, Page, pdfjs } from 'react-pdf';
 // drifts (the API and worker must match exactly).
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useStore } from '../../store';
+import { useElementClientWidth } from '../../hooks/useElementClientWidth';
 import { attachments } from '../../services/attachments';
 import { dialog } from '../../services/dialog';
 import { parseCsvPreview, type CsvPreview } from '../../services/preview/csv';
@@ -21,13 +29,17 @@ pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 type PreviewState =
   | { kind: 'loading' }
-  | { kind: 'pdf'; url: string; pages: number }
+  | { kind: 'pdf'; source: PdfSource; pages: number }
   | { kind: 'image'; url: string }
   | { kind: 'csv'; preview: CsvPreview }
   | { kind: 'text'; text: string }
   | { kind: 'office'; preview: OfficeTextPreview }
   | { kind: 'unsupported'; reason: string }
   | { kind: 'error'; message: string };
+
+type PdfSource = Blob;
+const PDF_PREVIEW_GUTTER_PX = 8;
+const PDF_PREVIEW_FALLBACK_WIDTH = 760;
 
 function extension(name: string): string {
   return name.split('.').pop()?.toLowerCase() ?? '';
@@ -41,6 +53,10 @@ function formatBytes(n: number): string {
 
 function isTextExt(ext: string): boolean {
   return ['txt', 'md', 'markdown', 'json', 'log', 'xml'].includes(ext);
+}
+
+function pdfBlobFromBytes(bytes: Uint8Array, mimeType: string): Blob {
+  return new Blob([bytes.slice()], { type: mimeType || 'application/pdf' });
 }
 
 export function AttachmentPreview({
@@ -70,10 +86,26 @@ function AttachmentPreviewInner({
 }) {
   const ext = useMemo(() => extension(attachment.filename), [attachment.filename]);
   const [state, setState] = useState<PreviewState>({ kind: 'loading' });
+  const [previewBodyRef, previewBodyWidth] =
+    useElementClientWidth<HTMLDivElement>();
+  const openAiPalette = useStore((s) => s.openAiPalette);
+  const [askMenu, setAskMenu] = useState<{
+    x: number;
+    y: number;
+    selectedText: string | null;
+  } | null>(null);
+  const [askExtracting, setAskExtracting] = useState(false);
+  const [askExtractError, setAskExtractError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     async function load() {
+      console.info('[mc:loading] AttachmentPreview load start', {
+        attachmentId: attachment.id,
+        kind: attachment.kind,
+        ext,
+        filename: attachment.filename,
+      });
       setState({ kind: 'loading' });
       try {
         if (attachment.kind === 'image') {
@@ -82,8 +114,14 @@ function AttachmentPreviewInner({
           return;
         }
         if (attachment.kind === 'pdf' || ext === 'pdf') {
-          const url = await attachments.toUrl(attachment);
-          if (alive) setState({ kind: 'pdf', url, pages: 0 });
+          const bytes = await attachments.readBytes(attachment);
+          if (alive) {
+            setState({
+              kind: 'pdf',
+              source: pdfBlobFromBytes(bytes, attachment.mimeType),
+              pages: 0,
+            });
+          }
           return;
         }
         const bytes = await attachments.readBytes(attachment);
@@ -110,6 +148,10 @@ function AttachmentPreviewInner({
               : 'No inline preview is available for this file type.',
         });
       } catch (err) {
+        console.error('[mc:loading] AttachmentPreview load failed', {
+          attachmentId: attachment.id,
+          err,
+        });
         if (alive) setState({ kind: 'error', message: String(err) });
       }
     }
@@ -137,6 +179,113 @@ function AttachmentPreviewInner({
     }
   }
 
+  /**
+   * Pull plain text from whatever preview state we have. PDFs go back to
+   * pdf.js for full-document text since the rendered DOM only carries the
+   * visible pages. Returns `null` when no extractable text exists (image
+   * / unsupported binaries) so the caller can disable the Ask action.
+   */
+  const extractFullText = useCallback(async (): Promise<string | null> => {
+    if (state.kind === 'text') return state.text;
+    if (state.kind === 'csv') {
+      return state.preview.rows.map((row) => row.join('\t')).join('\n');
+    }
+    if (state.kind === 'office') {
+      if (!state.preview.ok) return null;
+      if (state.preview.kind === 'docx') {
+        return state.preview.paragraphs.join('\n\n');
+      }
+      return state.preview.slides
+        .map((slide) =>
+          [`# Slide ${slide.index}`, ...slide.lines].join('\n'),
+        )
+        .join('\n\n');
+    }
+    if (state.kind === 'pdf') {
+      try {
+        const buf = await state.source.arrayBuffer();
+        const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) })
+          .promise;
+        const out: string[] = [];
+        const pages = Math.min(doc.numPages, 80);
+        for (let i = 1; i <= pages; i += 1) {
+          const page = await doc.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items
+            .map((item) =>
+              typeof (item as { str?: string }).str === 'string'
+                ? (item as { str: string }).str
+                : '',
+            )
+            .join(' ');
+          out.push(`# Page ${i}\n${text}`);
+        }
+        return out.join('\n\n');
+      } catch (err) {
+        console.warn('pdf text extraction failed', err);
+        return null;
+      }
+    }
+    return null;
+  }, [state]);
+
+  function onBodyContextMenu(e: ReactMouseEvent<HTMLDivElement>) {
+    // Inputs / textareas (none here today, kept defensive) keep their
+    // OS-native menu.
+    const target = e.target as HTMLElement;
+    if (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.isContentEditable
+    ) {
+      return;
+    }
+    const sel = window.getSelection();
+    const text = sel?.toString().trim() ?? '';
+    const within = sel?.anchorNode
+      ? previewBodyRef.current?.contains(sel.anchorNode) ?? false
+      : false;
+    e.preventDefault();
+    setAskMenu({
+      x: e.clientX,
+      y: e.clientY,
+      selectedText: within && text ? text : null,
+    });
+  }
+
+  async function runAsk(selectedText: string | null) {
+    setAskMenu(null);
+    if (selectedText) {
+      openAiPalette(selectedText, `attachment:${attachment.id}`);
+      return;
+    }
+    setAskExtracting(true);
+    try {
+      const full = await extractFullText();
+      if (!full) {
+        console.warn('No extractable text for', attachment.filename);
+        setAskExtractError(
+          `No extractable text from "${attachment.filename}".`,
+        );
+        return;
+      }
+      // Cap so a 200-page PDF doesn't choke the AI palette.
+      const ASK_INPUT_CAP = 24_000;
+      const trimmed =
+        full.length > ASK_INPUT_CAP
+          ? `${full.slice(0, ASK_INPUT_CAP)}…`
+          : full;
+      openAiPalette(trimmed, `attachment:${attachment.id}:full`);
+    } catch (err) {
+      console.warn('extractFullText failed', err);
+      setAskExtractError(
+        `Failed to extract text: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setAskExtracting(false);
+    }
+  }
+
   return (
     <div className="attachment-preview">
       <header className="attachment-preview-header">
@@ -148,15 +297,23 @@ function AttachmentPreviewInner({
           </p>
         </div>
         <div className="attachment-preview-actions">
-          <button type="button" onClick={() => void openExternal()}>
-            Open
+          <button
+            type="button"
+            onClick={() => void openExternal()}
+            title="Open with system default app"
+          >
+            Open externally
           </button>
           <button type="button" onClick={() => void reveal()}>
             Reveal
           </button>
         </div>
       </header>
-      <div className="attachment-preview-body">
+      <div
+        className="attachment-preview-body"
+        ref={previewBodyRef}
+        onContextMenu={onBodyContextMenu}
+      >
         {state.kind === 'loading' ? (
           <div className="attachment-preview-empty">Loading preview...</div>
         ) : null}
@@ -173,9 +330,10 @@ function AttachmentPreviewInner({
         ) : null}
         {state.kind === 'pdf' ? (
           <PdfInlinePreview
-            url={state.url}
+            source={state.source}
+            availableWidth={previewBodyWidth}
             onPages={(pages) =>
-              setState({ kind: 'pdf', url: state.url, pages })
+              setState({ kind: 'pdf', source: state.source, pages })
             }
           />
         ) : null}
@@ -187,31 +345,137 @@ function AttachmentPreviewInner({
           <OfficeTextPreviewView preview={state.preview} />
         ) : null}
       </div>
+      {askMenu ? (
+        <AskAttachmentMenu
+          x={askMenu.x}
+          y={askMenu.y}
+          selectedText={askMenu.selectedText}
+          fileLabel={displayName ?? attachment.filename}
+          onAsk={() => void runAsk(askMenu.selectedText)}
+          onClose={() => setAskMenu(null)}
+        />
+      ) : null}
+      {askExtracting ? (
+        <div className="attachment-ask-toast" role="status">
+          Extracting text from “{displayName ?? attachment.filename}” for AI…
+        </div>
+      ) : null}
+      {askExtractError ? (
+        <div
+          className="attachment-ask-toast error"
+          role="status"
+          onClick={() => setAskExtractError(null)}
+        >
+          {askExtractError} (click to dismiss)
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AskAttachmentMenu({
+  x,
+  y,
+  selectedText,
+  fileLabel,
+  onAsk,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  selectedText: string | null;
+  fileLabel: string;
+  onAsk: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function onPointer(e: globalThis.MouseEvent) {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', onPointer, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+  const preview = selectedText
+    ? selectedText.length > 60
+      ? `${selectedText.slice(0, 60)}…`
+      : selectedText
+    : null;
+  return (
+    <div
+      ref={ref}
+      className="app-context-menu"
+      role="menu"
+      style={{ position: 'fixed', left: x, top: y, zIndex: 220 }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {preview ? (
+        <div className="selection-menu-title" title={selectedText ?? ''}>
+          “{preview}”
+        </div>
+      ) : null}
+      <button type="button" className="app-context-menu-item" onClick={onAsk}>
+        {selectedText
+          ? 'Ask AI About Selection'
+          : `Ask AI About ${fileLabel}`}
+      </button>
     </div>
   );
 }
 
 function PdfInlinePreview({
-  url,
+  source,
+  availableWidth,
   onPages,
 }: {
-  url: string;
+  source: PdfSource;
+  availableWidth: number;
   onPages: (pages: number) => void;
 }) {
   const [numPages, setNumPages] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const pageWidth = Math.max(
+    160,
+    Math.floor(
+      (availableWidth || PDF_PREVIEW_FALLBACK_WIDTH) -
+        PDF_PREVIEW_GUTTER_PX * 2,
+    ),
+  );
   return (
     <Document
-      file={url}
+      file={source}
       onLoadSuccess={({ numPages }) => {
+        setLoadError(null);
         setNumPages(numPages);
         onPages(numPages);
       }}
+      onLoadError={(err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        setLoadError(message);
+        console.error('attachment PDF preview failed', err);
+      }}
       loading={<div className="attachment-preview-empty">Loading PDF...</div>}
-      error={<div className="result error">Failed to load PDF.</div>}
+      error={
+        <div className="result error">
+          Failed to load PDF{loadError ? `: ${loadError}` : '.'}
+        </div>
+      }
     >
       {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNo) => (
         <div key={pageNo} className="attachment-pdf-page">
-          <Page pageNumber={pageNo} width={760} renderAnnotationLayer={false} />
+          <Page
+            pageNumber={pageNo}
+            width={pageWidth}
+            renderAnnotationLayer={false}
+          />
           <div className="pdf-page-label muted">page {pageNo}</div>
         </div>
       ))}

@@ -11,6 +11,7 @@ export type MenuId =
   | 'file:detach-canvas'
   | 'chat:new-window'
   | 'canvas:new-window'
+  | 'canvas:open-tree-window'
   | 'view:show-chat'
   | 'view:hide-chat'
   | 'view:show-canvas'

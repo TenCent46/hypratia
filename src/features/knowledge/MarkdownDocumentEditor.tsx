@@ -113,19 +113,31 @@ export function MarkdownDocumentEditor({
     let cancelled = false;
     async function load() {
       if (!path) return;
+      console.info('[mc:loading] MarkdownDocumentEditor load start', path);
       setLoading(true);
       setLoadedPath(null);
       setError(null);
       try {
         const root = await resolveMarkdownRoot(configuredRoot);
         const nextContent = await markdownFiles.readFile(root, path);
-        if (cancelled) return;
+        if (cancelled) {
+          console.info('[mc:loading] MarkdownDocumentEditor load cancelled', path);
+          return;
+        }
         setRootPath(root);
         setContent(nextContent);
         setSavedContent(nextContent);
         setLoadedPath(path);
         setTitleDraft(stemFromPath(path));
+        console.info('[mc:loading] MarkdownDocumentEditor load done', {
+          path,
+          bytes: nextContent.length,
+        });
       } catch (err) {
+        console.error('[mc:loading] MarkdownDocumentEditor load failed', {
+          path,
+          err,
+        });
         if (!cancelled) {
           setRootPath('');
           setContent('');
@@ -513,8 +525,8 @@ export function MarkdownDocumentEditor({
           onSelect: reimport,
         });
       }
+      items.push({ separator: true });
       if (selectionText) {
-        items.push({ separator: true });
         items.push({
           label: 'Ask About Selection',
           onSelect: () => openAiPalette(selectionText, `kb-editor:${path}`),
@@ -523,11 +535,22 @@ export function MarkdownDocumentEditor({
           label: 'Search Selection',
           onSelect: () => setSearchOpen(true),
         });
+      } else {
+        // No selection — feed the whole document to the AI palette so the
+        // user can ask "summarise this", "explain section X", etc.
+        items.push({
+          label: 'Ask About This Document',
+          onSelect: () => {
+            const live = editorRef.current?.getDoc() ?? content;
+            openAiPalette(live, `kb-editor:${path}`);
+          },
+        });
       }
       return items;
     },
     [
       copyMarkdownPath,
+      content,
       copyObsidianLink,
       dirty,
       isMirror,

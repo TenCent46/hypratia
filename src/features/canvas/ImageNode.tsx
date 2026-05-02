@@ -27,6 +27,15 @@ function ImageNodeImpl({ data, selected }: NodeProps<ImageNodeType>) {
     };
   }, [att]);
 
+  function preview() {
+    if (!att) return;
+    window.dispatchEvent(
+      new CustomEvent('mc:open-attachment-preview', {
+        detail: { attachmentId: att.id, title: data.title || att.filename },
+      }),
+    );
+  }
+
   return (
     <>
       <NodeResizer
@@ -37,7 +46,14 @@ function ImageNodeImpl({ data, selected }: NodeProps<ImageNodeType>) {
         lineClassName="mc-resize-line"
         handleClassName="mc-resize-handle"
       />
-      <div className={`markdown-node image-node${selected ? ' selected' : ''}`}>
+      <div
+        className={`markdown-node image-node${selected ? ' selected' : ''}`}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          preview();
+        }}
+        title="Double-click to open in preview"
+      >
         <NodeHandles />
         {data.title ? <div className="title">{data.title}</div> : null}
         <div className="content image-content">

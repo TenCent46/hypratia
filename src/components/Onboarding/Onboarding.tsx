@@ -42,7 +42,7 @@ function OnboardingInner() {
     <div className="modal-backdrop" onClick={() => undefined}>
       <div className="modal onboarding" onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>Welcome to Memory Canvas</h2>
+          <h2>Welcome to Hypratia</h2>
           <button type="button" className="close" onClick={finish} title="Skip">
             ×
           </button>

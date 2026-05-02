@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { CanvasTool } from '../../store';
 import {
   AppContextMenuItem as Item,
@@ -8,6 +8,7 @@ import {
   PaneMenuSubmenu,
   type PaneMenuControl,
 } from '../PanesContextMenu/PanesContextMenu';
+import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
 
 export type CanvasPanelContextMenuProps = {
   x: number;
@@ -18,10 +19,12 @@ export type CanvasPanelContextMenuProps = {
   canvasTool: CanvasTool;
   hasSelection: boolean;
   hasNodes: boolean;
+  canAddNode: boolean;
   onShowCanvas?: () => void;
   onHideCanvas?: () => void;
   onShowChat?: () => void;
   onHideChat?: () => void;
+  onAddNode: () => void;
   onResetView: () => void;
   onFitView: () => void;
   onFitToCanvas: () => void;
@@ -38,10 +41,12 @@ export function CanvasPanelContextMenu({
   canvasTool,
   hasSelection,
   hasNodes,
+  canAddNode,
   onShowCanvas,
   onHideCanvas,
   onShowChat,
   onHideChat,
+  onAddNode,
   onResetView,
   onFitView,
   onFitToCanvas,
@@ -49,23 +54,7 @@ export function CanvasPanelContextMenu({
   onClose,
 }: CanvasPanelContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const pad = 8;
-    let nx = x;
-    let ny = y;
-    if (nx + rect.width + pad > window.innerWidth) {
-      nx = Math.max(pad, window.innerWidth - rect.width - pad);
-    }
-    if (ny + rect.height + pad > window.innerHeight) {
-      ny = Math.max(pad, window.innerHeight - rect.height - pad);
-    }
-    if (nx !== pos.x || ny !== pos.y) setPos({ x: nx, y: ny });
-  }, [x, y, pos.x, pos.y]);
+  const pos = useClampedMenuPosition(ref, x, y);
 
   useEffect(() => {
     function onPointer(e: PointerEvent) {
@@ -100,6 +89,15 @@ export function CanvasPanelContextMenu({
       style={{ left: pos.x, top: pos.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
+      <Item
+        onClick={() => {
+          onAddNode();
+          onClose();
+        }}
+        label="Add Node"
+        disabled={!canAddNode}
+      />
+      <Separator />
       {paneMenuItems ? (
         <>
           <PaneMenuSubmenu items={paneMenuItems} onSelect={onClose} />

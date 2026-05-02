@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useChatStream } from './useChatStream';
 import { ChatHeader } from './ChatHeader';
 import { ChatTabBar } from './ChatTabBar';
@@ -81,13 +81,25 @@ export function ChatPanel() {
     }
   }
 
+  // Stable callback so `MessageRow`'s React.memo can short-circuit
+  // re-renders. A fresh inline arrow on every parent render would defeat
+  // the memo and we'd parse markdown for every row on every chunk.
+  const onRegenerate = useCallback(
+    (messageId: string) => regenerate(messageId, mode),
+    [regenerate, mode],
+  );
+  const onSend = useCallback(
+    (text: string, attachmentIds: string[]) => send(text, mode, attachmentIds),
+    [send, mode],
+  );
+
   return (
     <div className="chat-panel">
       <ChatTabBarSlot />
       <ChatHeader streaming={streaming} onAbort={abort} />
-      <MessageList onRegenerate={(messageId) => regenerate(messageId, mode)} />
+      <MessageList onRegenerate={onRegenerate} />
       <MessageInput
-        onSend={(text, attachmentIds) => send(text, mode, attachmentIds)}
+        onSend={onSend}
         streaming={streaming}
         onAbort={abort}
         mode={mode}

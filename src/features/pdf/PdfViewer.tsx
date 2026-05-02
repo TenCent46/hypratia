@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { useReactFlow } from '@xyflow/react';
 import { useStore } from '../../store';
+import { useElementClientWidth } from '../../hooks/useElementClientWidth';
 import { attachments } from '../../services/attachments';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -20,6 +21,10 @@ type SelectionState = {
   anchorLeft: number;
   anchorTop: number;
 } | null;
+
+type PdfSource = Blob;
+const PDF_VIEWER_GUTTER_PX = 8;
+const PDF_VIEWER_FALLBACK_WIDTH = 720;
 
 export function PdfViewer() {
   const attId = useStore((s) => s.ui.pdfViewerAttachmentId);
@@ -47,15 +52,30 @@ function PdfViewerInner({
   const addEdge = useStore((s) => s.addEdge);
   const openAiPalette = useStore((s) => s.openAiPalette);
   const flow = useReactFlow();
-  const [url, setUrl] = useState<string | null>(null);
+  const [source, setSource] = useState<PdfSource | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
   const [selection, setSelection] = useState<SelectionState>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerRef, containerWidth] =
+    useElementClientWidth<HTMLDivElement>();
+  const pageWidth = Math.max(
+    160,
+    Math.floor(
+      (containerWidth || PDF_VIEWER_FALLBACK_WIDTH) -
+        PDF_VIEWER_GUTTER_PX * 2,
+    ),
+  );
 
   useEffect(() => {
     let on = true;
-    attachments.toUrl(attachment).then((u) => {
-      if (on) setUrl(u);
+    attachments.readBytes(attachment).then((bytes) => {
+      if (on) {
+        setSource(
+          new Blob([bytes.slice()], {
+            type: attachment.mimeType || 'application/pdf',
+          }),
+        );
+      }
     });
     return () => {
       on = false;
@@ -181,12 +201,24 @@ function PdfViewerInner({
           onMouseUp={captureSelection}
           onTouchEnd={captureSelection}
         >
-          {url ? (
+          {source ? (
             <Document
-              file={url}
-              onLoadSuccess={({ numPages }) => setNumPages(numPages)}
+              file={source}
+              onLoadSuccess={({ numPages }) => {
+                setLoadError(null);
+                setNumPages(numPages);
+              }}
+              onLoadError={(err) => {
+                const message = err instanceof Error ? err.message : String(err);
+                setLoadError(message);
+                console.error('PDF viewer failed', err);
+              }}
               loading={<div className="muted">Loading PDF…</div>}
-              error={<div className="result error">Failed to load PDF.</div>}
+              error={
+                <div className="result error">
+                  Failed to load PDF{loadError ? `: ${loadError}` : '.'}
+                </div>
+              }
             >
               {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNo) => (
                 <div
@@ -196,7 +228,7 @@ function PdfViewerInner({
                 >
                   <Page
                     pageNumber={pageNo}
-                    width={720}
+                    width={pageWidth}
                     renderAnnotationLayer={false}
                   />
                   <div className="pdf-page-label muted">page {pageNo}</div>

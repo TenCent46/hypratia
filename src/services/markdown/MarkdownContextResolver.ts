@@ -3,8 +3,15 @@ import type { CanvasNode, Edge, ID } from '../../types';
 import {
   markdownFiles,
   resolveMarkdownRoot,
+  ensureFolderPath,
   type MarkdownTreeNode,
 } from '../storage/MarkdownFileService';
+import {
+  PROJECT_CHAT_HISTORY_DIR,
+  ROOT_CHAT_HISTORY_DIR,
+  isMirrorManagedPath,
+  projectBasePath,
+} from '../knowledge/knowledgeBaseLayout';
 import { wikiTitle } from './WikiLinkSyncService';
 
 export type MarkdownContextFile = {
@@ -35,16 +42,23 @@ function sanitizeFileBase(title: string): string {
   return base || 'Untitled';
 }
 
+function canvasFolderForNode(node: CanvasNode): string {
+  const state = useStore.getState();
+  const conv = state.conversations.find((c) => c.id === node.conversationId);
+  const project = conv?.projectId
+    ? state.projects.find((p) => p.id === conv.projectId)
+    : undefined;
+  return project
+    ? `${projectBasePath(project)}/${PROJECT_CHAT_HISTORY_DIR}`
+    : ROOT_CHAT_HISTORY_DIR;
+}
+
 async function createCanonicalFile(
   rootPath: string,
   node: CanvasNode,
 ): Promise<string> {
-  const folder = 'Canvas Nodes';
-  try {
-    await markdownFiles.createFolder(rootPath, '', folder);
-  } catch {
-    // Folder already exists or was created by another window.
-  }
+  const folder = canvasFolderForNode(node);
+  await ensureFolderPath(rootPath, folder);
   const base = sanitizeFileBase(node.title || 'Untitled');
   let lastErr: unknown = null;
   for (let i = 0; i < 100; i += 1) {
@@ -68,7 +82,11 @@ export async function ensureNodeMarkdownPath(
   const state = useStore.getState();
   const node = state.nodes.find((n) => n.id === nodeId);
   if (!node) return null;
-  if (node.mdPath) return node.mdPath;
+  // A pre-existing mdPath that points at a mirror-managed location is
+  // treated as unset: writing user content there would clobber the
+  // mirror's frontmatter and produce "not owned" errors. Leave the bad
+  // path off the node and mint a fresh canonical one under canvas/.
+  if (node.mdPath && !isMirrorManagedPath(node.mdPath)) return node.mdPath;
   if (node.kind && node.kind !== 'markdown') return null;
   const path = await createCanonicalFile(rootPath, node);
   state.updateNode(node.id, { mdPath: path });

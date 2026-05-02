@@ -102,8 +102,8 @@ async function readPdfPageCount(att: Attachment): Promise<number | null> {
       import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
     ]);
     pdfjs.GlobalWorkerOptions.workerSrc = workerModule.default;
-    const url = await attachments.toUrl(att);
-    const doc = await pdfjs.getDocument(url).promise;
+    const bytes = await attachments.readBytes(att);
+    const doc = await pdfjs.getDocument({ data: bytes }).promise;
     const n = doc.numPages;
     await doc.destroy();
     return n;

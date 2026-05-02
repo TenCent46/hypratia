@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../../store';
 import { onMenuEvent, type MenuId } from '../menu';
-import { openCanvasWorkspaceWindow, openChatWindow } from '../window';
+import {
+  openCanvasWorkspaceWindow,
+  openChatWindow,
+  openRelationshipTreeWindow,
+} from '../window';
 
 export type LayoutControls = {
   focusCanvasPane: () => void;
@@ -69,6 +73,11 @@ export function useMenu(controls: LayoutControls): void {
           s.setActiveConversation(chatId);
           void openCanvasWorkspaceWindow(chatId);
           controlsRef.current.focusChatPane();
+          break;
+        }
+        case 'canvas:open-tree-window': {
+          const chatId = s.settings.lastConversationId ?? undefined;
+          void openRelationshipTreeWindow(chatId);
           break;
         }
         case 'view:show-chat':

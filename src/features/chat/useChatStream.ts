@@ -14,7 +14,13 @@ import type {
 import { getModelMeta } from '../../services/llm';
 import type { Attachment, ID, ModelRef } from '../../types';
 
-export type ChatMode = 'chat' | 'search' | 'deep_search';
+import {
+  modeSystemPrompt,
+  webSearchAvailableFor,
+  type ChatMode,
+} from '../../services/llm/searchMode';
+
+export type { ChatMode };
 export type SendContextOptions = {
   systemContext?: string;
   contextSummary?: {
@@ -23,36 +29,6 @@ export type SendContextOptions = {
     fileNames: string[];
   };
 };
-
-function modeSystemPrompt(
-  mode: ChatMode,
-  webSearchAvailable: boolean,
-): string | null {
-  if (mode === 'search') {
-    return webSearchAvailable
-      ? 'Search mode is selected. Use the web_search tool to look up current information whenever the answer benefits from up-to-date sources, then cite the URLs you used in your reply.'
-      : 'Search mode is selected. The selected model does not have a web search tool wired in this build, so say that clearly. Do not imply that you browsed the web or fabricate citations.';
-  }
-  if (mode === 'deep_search') {
-    return webSearchAvailable
-      ? 'Deep search mode is selected. Run multiple web_search calls to triangulate sources, then produce a structured research brief with research plan, key findings, uncertainties, and citations. Cite the URLs you actually retrieved.'
-      : 'Deep search mode is selected. The selected model does not have a web search tool wired, so say that clearly and do not fabricate citations. Produce a structured research brief from prior knowledge with research plan, key findings, uncertainties, and suggested source queries.';
-  }
-  return null;
-}
-
-function webSearchAvailableFor(model: ModelRef | undefined): boolean {
-  if (!model) return false;
-  if (
-    model.provider !== 'anthropic' &&
-    model.provider !== 'openai' &&
-    model.provider !== 'google'
-  ) {
-    return false;
-  }
-  const meta = getModelMeta(model.provider, model.model);
-  return Boolean(meta?.capabilities?.includes('web_search'));
-}
 
 const ARTIFACT_TOOL_POLICY = [
   'Artifact tools (file generation):',
@@ -63,6 +39,15 @@ const ARTIFACT_TOOL_POLICY = [
   '- create_video_artifact — only when video is enabled and the user asks for a video.',
   'After a successful tool call, give a short chat summary of what was generated; the file itself is already attached.',
   'Do not force file generation for short / conversational answers. Use tools only when the user clearly wants a file or the output is meaningfully better as a file.',
+].join('\n');
+
+const PROJECT_KNOWLEDGE_TOOL_POLICY = [
+  'Project knowledge tools:',
+  '- knowledge_search searches raw project documents that have been extracted into the local processed/ index.',
+  '- knowledge_read_document_range reads exact canonical page or sentence ranges after a search result identifies a documentId.',
+  '- For project-specific factual claims, document/PDF/source questions, filenames, quotes, sections, or uncertain project facts, use knowledge_search before answering.',
+  '- Cite retrieved evidence compactly with the citation strings returned by the tools.',
+  '- If retrieval is weak or empty after a reasonable broadened query, say the answer was not found in the project knowledge.',
 ].join('\n');
 
 /**
@@ -259,6 +244,25 @@ export function useChatStream() {
       abortRef.current = controller;
       setStreaming(true);
 
+      // Coalesce text chunks into one store update per animation frame.
+      // Models stream 30–60 deltas a second; calling `append()` on every
+      // delta flushes a Zustand update + React reconcile + DOM layout for
+      // each one, which blocks the main thread enough to make scrolling
+      // feel choppy. Buffering gives the browser time to satisfy the
+      // user's pointer events between paints.
+      let pending = '';
+      let frameHandle: number | null = null;
+      const flushPending = () => {
+        frameHandle = null;
+        if (!pending) return;
+        const next = pending;
+        pending = '';
+        append(placeholder.id, next);
+      };
+      const schedule = () => {
+        if (frameHandle !== null) return;
+        frameHandle = requestAnimationFrame(flushPending);
+      };
       try {
         let usage: { input: number; output: number } | undefined;
         for await (const chunk of chat.stream(
@@ -278,7 +282,21 @@ export function useChatStream() {
             usage = chunk.usage;
             continue;
           }
-          if ('text' in chunk) append(placeholder.id, chunk.text);
+          if ('text' in chunk) {
+            pending += chunk.text;
+            schedule();
+          }
+        }
+        // Drain whatever was buffered before finalising — without this
+        // the very last frame of text could be dropped when the loop
+        // exits faster than the rAF timer fires.
+        if (frameHandle !== null) {
+          cancelAnimationFrame(frameHandle);
+          frameHandle = null;
+        }
+        if (pending) {
+          append(placeholder.id, pending);
+          pending = '';
         }
         if (controller.signal.aborted) {
           append(placeholder.id, '\n\n_(stopped)_');
@@ -305,6 +323,10 @@ export function useChatStream() {
           console.warn('[chat] auto title failed', titleErr);
         });
       } finally {
+        if (frameHandle !== null) {
+          cancelAnimationFrame(frameHandle);
+          frameHandle = null;
+        }
         setStreaming(false);
         abortRef.current = null;
       }
@@ -364,6 +386,7 @@ export function useChatStream() {
       const history: ChatMessage[] = [];
       if (sysPrompt) history.push({ role: 'system', content: sysPrompt });
       if (projectContext) history.push({ role: 'system', content: projectContext });
+      history.push({ role: 'system', content: PROJECT_KNOWLEDGE_TOOL_POLICY });
       if (modePrompt) history.push({ role: 'system', content: modePrompt });
       history.push({ role: 'system', content: ARTIFACT_TOOL_POLICY });
       if (context?.systemContext) {
@@ -427,7 +450,10 @@ export function useChatStream() {
         (mode === 'search' || mode === 'deep_search') &&
         webSearchAvailableFor(model);
       const modePrompt = modeSystemPrompt(mode, webSearchActive);
+      const projectContext = await readProjectKnowledgeContext(conv?.projectId);
       if (sysPrompt) history.push({ role: 'system', content: sysPrompt });
+      if (projectContext) history.push({ role: 'system', content: projectContext });
+      history.push({ role: 'system', content: PROJECT_KNOWLEDGE_TOOL_POLICY });
       if (modePrompt) history.push({ role: 'system', content: modePrompt });
       history.push({ role: 'system', content: ARTIFACT_TOOL_POLICY });
       for (const m of prior.slice(-30)) {

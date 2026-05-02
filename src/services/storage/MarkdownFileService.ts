@@ -27,6 +27,13 @@ export const markdownFiles = {
     return await invoke<MarkdownTreeNode>('list_markdown_tree', { rootPath });
   },
 
+  /** Like `listTree` but includes files of any extension. Used by the
+      workspace-config Files panel so PDFs / spreadsheets / images that
+      land in `raw/` are visible. */
+  async listFullTree(rootPath: string): Promise<MarkdownTreeNode> {
+    return await invoke<MarkdownTreeNode>('list_full_tree', { rootPath });
+  },
+
   async readFile(rootPath: string, path: string): Promise<string> {
     return await invoke<string>('read_markdown_file', { rootPath, path });
   },

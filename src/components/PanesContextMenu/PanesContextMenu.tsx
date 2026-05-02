@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   AppContextMenuItem as Item,
   AppContextMenuSeparator as Separator,
 } from '../ContextMenu/AppContextMenuItem';
+import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
 
 export type PaneMenuControl = {
   id: string;
@@ -78,23 +79,7 @@ export function PanesContextMenu({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const pad = 8;
-    let nx = x;
-    let ny = y;
-    if (nx + rect.width + pad > window.innerWidth) {
-      nx = Math.max(pad, window.innerWidth - rect.width - pad);
-    }
-    if (ny + rect.height + pad > window.innerHeight) {
-      ny = Math.max(pad, window.innerHeight - rect.height - pad);
-    }
-    if (nx !== pos.x || ny !== pos.y) setPos({ x: nx, y: ny });
-  }, [x, y, pos.x, pos.y]);
+  const pos = useClampedMenuPosition(ref, x, y);
 
   useEffect(() => {
     function onPointer(e: PointerEvent) {

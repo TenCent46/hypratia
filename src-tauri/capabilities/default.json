@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for all Memory Canvas windows during development",
+  "description": "Capability for all Hypratia windows during development",
   "windows": ["*"],
   "webviews": ["*"],
   "permissions": [
@@ -22,7 +22,13 @@
     "core:window:allow-hide",
     "opener:default",
     "opener:allow-reveal-item-in-dir",
-    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/**" }
+      ]
+    },
     "fs:default",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",

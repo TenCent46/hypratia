@@ -85,6 +85,42 @@ export function MessageInput({
     ta.style.height = `${Math.min(ta.scrollHeight, MAX_INPUT_HEIGHT)}px`;
   }, [text]);
 
+  // Allow other parts of the app (e.g., chat selection right-click → Ask)
+  // to push a quoted block into the composer. Appends to whatever the
+  // user already typed so an in-flight question is preserved, then
+  // focuses the textarea so they can type their question right away.
+  useEffect(() => {
+    function onPrefill(e: Event) {
+      const detail = (e as CustomEvent<{ quoted?: string; text?: string }>)
+        .detail;
+      if (!detail) return;
+      const quoted = detail.quoted?.trim();
+      const verbatim = detail.text;
+      setText((current) => {
+        const block = quoted
+          ? `${quoted
+              .split('\n')
+              .map((line) => `> ${line}`)
+              .join('\n')}\n\n`
+          : verbatim ?? '';
+        if (!block) return current;
+        return current ? `${current}\n${block}` : block;
+      });
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      });
+    }
+    window.addEventListener('mc:chat-prefill', onPrefill as EventListener);
+    return () =>
+      window.removeEventListener(
+        'mc:chat-prefill',
+        onPrefill as EventListener,
+      );
+  }, []);
+
   function send() {
     const trimmed = text.trim();
     if (!trimmed && pending.length === 0) return;

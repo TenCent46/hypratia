@@ -10,8 +10,11 @@ import {
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { ViewModeToggle } from './components/ViewModeToggle/ViewModeToggle';
 import { CanvasPanel } from './features/canvas/CanvasPanel';
+import { TreePanel } from './features/tree-view/TreePanel';
 import { MarkdownDocumentEditor } from './features/knowledge/MarkdownDocumentEditor';
 import { AttachmentPreview } from './features/preview/AttachmentPreview';
+import { KnowledgeFilePreview } from './features/preview/KnowledgeFilePreview';
+import { resolveCitation } from './services/knowledge/citationNavigation';
 import { RightPane } from './components/RightPane/RightPane';
 import {
   PanesContextMenu,
@@ -59,6 +62,17 @@ type WorkspaceDocTab =
   | { id: string; kind: 'markdown'; path: string; preview?: boolean }
   | {
       id: string;
+      kind: 'knowledge-file';
+      path: string;
+      preview?: boolean;
+      /** Citation jump target — KnowledgeFilePreview scrolls a PDF to
+       *  pageStart and keeps sentence offsets for future highlighting. */
+      pageStart?: number;
+      sentenceStart?: number;
+      sentenceEnd?: number;
+    }
+  | {
+      id: string;
       kind: 'attachment';
       attachmentId: string;
       title?: string;
@@ -83,6 +97,10 @@ function markdownTabId(path: string): string {
   return `md:${path}`;
 }
 
+function knowledgeFileTabId(path: string): string {
+  return `kb:${path}`;
+}
+
 function attachmentTabId(attachmentId: string): string {
   return `att:${attachmentId}`;
 }
@@ -97,6 +115,7 @@ function App() {
   const theme = useStore((s) => s.settings.theme);
 
   useEffect(() => {
+    console.info('[mc:loading] App splash — hydrateAndWire start');
     hydrateAndWire()
       .then(() => {
         const tabId = getInitialTabId();
@@ -106,10 +125,11 @@ function App() {
             s.setActiveConversation(tabId);
           }
         }
+        console.info('[mc:loading] App splash — hydrate done, setReady(true)');
         setReady(true);
       })
       .catch((err) => {
-        console.error('hydration failed', err);
+        console.error('[mc:loading] App splash — hydration failed', err);
         setError(String(err));
       });
   }, []);
@@ -134,7 +154,21 @@ function App() {
 
   if (error) return <div className="splash error">Failed to load: {error}</div>;
   if (!ready) return <div className="splash">Loading…</div>;
+  // Detached tree window: render only the read-only tree projection.
+  // Skip the full ReadyApp shell since the tree view never needs a
+  // sidebar / chat / editor pane around it. See spec 36.
+  if (getInitialLayoutPreset() === 'treeFocused') {
+    return <TreeWindowShell />;
+  }
   return <ReadyApp />;
+}
+
+function TreeWindowShell() {
+  return (
+    <div className="app workspace-window tree-window-root">
+      <TreePanel />
+    </div>
+  );
 }
 
 function ReadyApp() {
@@ -214,19 +248,47 @@ function ReadyApp() {
   const focusOrAddWorkspaceTab = useCallback(
     (tab: WorkspaceDocTab, opts?: { preview?: boolean }) => {
       const preview = opts?.preview ?? false;
+      console.debug('[mc:cite] focusOrAddWorkspaceTab', {
+        id: tab.id,
+        kind: tab.kind,
+        preview,
+        ...(tab.kind === 'knowledge-file'
+          ? {
+              path: tab.path,
+              pageStart: tab.pageStart,
+              sentenceStart: tab.sentenceStart,
+            }
+          : {}),
+      });
       setWorkspaceTabs((tabs) => {
         if (tabs.some((existing) => existing.id === tab.id)) {
           // Re-clicking an already-open tab focuses it without changing
-          // its preview state. Title-only refresh kept for attachments.
-          return tabs.map((existing) =>
-            existing.id === tab.id &&
-            existing.kind === 'attachment' &&
-            tab.kind === 'attachment' &&
-            tab.title &&
-            existing.title !== tab.title
-              ? { ...existing, title: tab.title }
-              : existing,
-          );
+          // its preview state. Two metadata refreshes are allowed:
+          //   - attachment titles (existing behaviour)
+          //   - knowledge-file citation jump targets, so clicking a
+          //     citation for page 5 then one for page 12 of the same
+          //     file actually scrolls to page 12 instead of silently
+          //     keeping the old jump target.
+          return tabs.map((existing) => {
+            if (existing.id !== tab.id) return existing;
+            if (
+              existing.kind === 'attachment' &&
+              tab.kind === 'attachment' &&
+              tab.title &&
+              existing.title !== tab.title
+            ) {
+              return { ...existing, title: tab.title };
+            }
+            if (existing.kind === 'knowledge-file' && tab.kind === 'knowledge-file') {
+              return {
+                ...existing,
+                pageStart: tab.pageStart,
+                sentenceStart: tab.sentenceStart,
+                sentenceEnd: tab.sentenceEnd,
+              };
+            }
+            return existing;
+          });
         }
         // New preview tab evicts whatever is currently in the preview
         // slot. Permanent tabs are left alone.
@@ -393,6 +455,30 @@ function ReadyApp() {
     [focusOrAddWorkspaceTab],
   );
 
+  const openKnowledgeFilePreview = useCallback(
+    (
+      path: string,
+      jump?: {
+        pageStart?: number;
+        sentenceStart?: number;
+        sentenceEnd?: number;
+      },
+    ) => {
+      focusOrAddWorkspaceTab(
+        {
+          id: knowledgeFileTabId(path),
+          kind: 'knowledge-file',
+          path,
+          pageStart: jump?.pageStart,
+          sentenceStart: jump?.sentenceStart,
+          sentenceEnd: jump?.sentenceEnd,
+        },
+        { preview: true },
+      );
+    },
+    [focusOrAddWorkspaceTab],
+  );
+
   const returnToCanvas = useCallback(() => {
     setMarkdownPanelState('hidden');
     showCanvas();
@@ -538,6 +624,90 @@ function ReadyApp() {
         onOpenAttachmentPreview,
       );
   }, [openAttachmentPreview]);
+
+  useEffect(() => {
+    function onOpenKnowledgeFilePreview(e: Event) {
+      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+      if (path) openKnowledgeFilePreview(path);
+    }
+    function onOpenKnowledgeCitation(e: Event) {
+      const detail = (e as CustomEvent<{
+        filename?: string;
+        pageStart?: number;
+        sentenceStart?: number;
+        sentenceEnd?: number;
+      }>).detail;
+      console.info('[mc:cite] event received in App', detail);
+      if (!detail?.filename) {
+        console.warn('[mc:cite] event ignored — missing filename', detail);
+        return;
+      }
+      void (async () => {
+        try {
+          const resolved = await resolveCitation({
+            filename: detail.filename!,
+            pageStart: detail.pageStart,
+            sentenceStart: detail.sentenceStart,
+            sentenceEnd: detail.sentenceEnd,
+          });
+          if (!resolved) {
+            console.warn('[mc:cite] resolveCitation returned null', detail);
+            // Surface the failure via the existing knowledge sync toast
+            // channel so the user sees feedback even when devtools is
+            // closed. If the KB panel isn't mounted, the warn above is
+            // the only signal — that's fine, this is best-effort.
+            window.dispatchEvent(
+              new CustomEvent('mc:knowledge-sync', {
+                detail: {
+                  error: `Citation source "${detail.filename}" not found in any indexed project. Open Project Settings → Files and confirm it was added & indexed.`,
+                },
+              }),
+            );
+            return;
+          }
+          console.debug('[mc:cite] opening preview tab', {
+            sourcePath: resolved.sourcePath,
+            pageStart: resolved.pageStart,
+            status: resolved.status,
+          });
+          openKnowledgeFilePreview(resolved.sourcePath, {
+            pageStart: resolved.pageStart,
+            sentenceStart: resolved.sentenceStart,
+            sentenceEnd: resolved.sentenceEnd,
+          });
+        } catch (err) {
+          console.error('[mc:cite] resolveCitation threw', err, detail);
+          window.dispatchEvent(
+            new CustomEvent('mc:knowledge-sync', {
+              detail: {
+                error: `Citation lookup failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              },
+            }),
+          );
+        }
+      })();
+    }
+    window.addEventListener(
+      'mc:open-knowledge-file-preview',
+      onOpenKnowledgeFilePreview,
+    );
+    window.addEventListener(
+      'mc:open-knowledge-citation',
+      onOpenKnowledgeCitation,
+    );
+    return () => {
+      window.removeEventListener(
+        'mc:open-knowledge-file-preview',
+        onOpenKnowledgeFilePreview,
+      );
+      window.removeEventListener(
+        'mc:open-knowledge-citation',
+        onOpenKnowledgeCitation,
+      );
+    };
+  }, [openKnowledgeFilePreview]);
 
   useEffect(() => {
     if (!layoutMenu) return;
@@ -752,7 +922,9 @@ function ReadyApp() {
     (tab: WorkspaceDocTab) =>
       tab.kind === 'markdown'
         ? fileNameFromPath(tab.path)
-        : tab.title ?? attachmentNameById.get(tab.attachmentId) ?? 'Preview',
+        : tab.kind === 'knowledge-file'
+          ? fileNameFromPath(tab.path)
+          : tab.title ?? attachmentNameById.get(tab.attachmentId) ?? 'Preview',
     [attachmentNameById],
   );
 
@@ -832,6 +1004,14 @@ function ReadyApp() {
                     path={activeWorkspaceTab.path}
                     onClose={closeActiveWorkspaceTab}
                     onOpenInWindow={openCurrentMarkdownWindow}
+                  />
+                ) : activeWorkspaceTab.kind === 'knowledge-file' ? (
+                  <KnowledgeFilePreview
+                    key={activeWorkspaceTab.id}
+                    path={activeWorkspaceTab.path}
+                    pageStart={activeWorkspaceTab.pageStart}
+                    sentenceStart={activeWorkspaceTab.sentenceStart}
+                    sentenceEnd={activeWorkspaceTab.sentenceEnd}
                   />
                 ) : (
                   <AttachmentPreview

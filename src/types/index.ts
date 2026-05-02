@@ -158,11 +158,21 @@ export type ModelRef = {
   model: string;
 };
 
+export type AttachmentStorageRoot = 'vault' | 'appData' | 'external';
+
 export type Attachment = {
   id: ID;
   kind: 'image' | 'pdf' | 'audio' | 'video' | 'file';
   filename: string;
-  relPath: string; // attachments/YYYY-MM/<file>
+  /**
+   * Where `relPath` is rooted. Records written before this field existed
+   * are loaded as 'appData' (see hydrate path in store/persistence.ts).
+   *   'vault'    → relative to the resolved Markdown vault root
+   *   'appData'  → relative to appDataDir() (legacy)
+   *   'external' → reserved; not yet emitted
+   */
+  storageRoot: AttachmentStorageRoot;
+  relPath: string;
   mimeType: string;
   bytes: number;
   width?: number;

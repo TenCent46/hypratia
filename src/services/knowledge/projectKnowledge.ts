@@ -6,12 +6,18 @@ import {
 } from '../storage/MarkdownFileService';
 import {
   defaultInstructionPath,
+  defaultMetaInstructionPath,
   defaultMemoryPath,
   legacyProjectInstructionPath,
   legacyProjectMemoryPath,
   projectInstructionPath,
+  projectMetaInstructionPath,
   projectMemoryPath,
 } from './knowledgeBaseLayout';
+import {
+  ensureProjectMetaInstructionForProject,
+  rebuildProjectKnowledge,
+} from './projectRetrieval';
 
 function markdownBody(text: string | null): string {
   if (!text) return '';
@@ -47,7 +53,9 @@ export async function readProjectKnowledgeContext(
     ? state.projects.find((p) => p.id === projectId)
     : null;
 
-  const [instructionRaw, memoryRaw] = await Promise.all(
+  await ensureProjectMetaInstructionForProject(project?.name);
+
+  const [instructionRaw, memoryRaw, metaRaw] = await Promise.all(
     project
       ? [
           readWithFallback(
@@ -60,17 +68,23 @@ export async function readProjectKnowledgeContext(
             projectMemoryPath(project),
             legacyProjectMemoryPath(project),
           ),
+          tryReadMarkdownFile(rootPath, projectMetaInstructionPath(project)),
         ]
       : [
           tryReadMarkdownFile(rootPath, defaultInstructionPath()),
           tryReadMarkdownFile(rootPath, defaultMemoryPath()),
+          tryReadMarkdownFile(rootPath, defaultMetaInstructionPath()),
         ],
   );
 
   const instruction = markdownBody(instructionRaw);
   const memory = markdownBody(memoryRaw);
+  const meta = markdownBody(metaRaw);
   const systemPrompt = project?.systemPrompt?.trim() ?? '';
-  if (!instruction && !memory && !systemPrompt) return null;
+  void rebuildProjectKnowledge(project?.name).catch((err) => {
+    console.warn('[knowledge] background rebuild failed', err);
+  });
+  if (!instruction && !memory && !meta && !systemPrompt) return null;
 
   const heading = project
     ? 'Project Knowledge Base context:'
@@ -81,6 +95,7 @@ export async function readProjectKnowledgeContext(
     systemPrompt ? `## Project system prompt\n${systemPrompt}` : '',
     instruction ? `## instruction.md\n${instruction}` : '',
     memory ? `## memory.md\n${memory}` : '',
+    meta ? `## meta-instruction.md\n${meta}` : '',
   ]
     .filter(Boolean)
     .join('\n\n');

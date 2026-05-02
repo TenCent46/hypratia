@@ -1,6 +1,6 @@
-import { open } from '@tauri-apps/plugin-dialog';
+import { ask, open } from '@tauri-apps/plugin-dialog';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
-import type { Dialog } from './Dialog';
+import type { AskOptions, Dialog } from './Dialog';
 
 export class TauriDialog implements Dialog {
   async pickFolder(): Promise<string | null> {
@@ -14,5 +14,14 @@ export class TauriDialog implements Dialog {
 
   async openWithSystem(absPath: string): Promise<void> {
     await openPath(absPath);
+  }
+
+  async ask(message: string, options: AskOptions = {}): Promise<boolean> {
+    return await ask(message, {
+      title: options.title,
+      kind: options.kind,
+      okLabel: options.okLabel,
+      cancelLabel: options.cancelLabel,
+    });
   }
 }
