@@ -55,7 +55,7 @@ async function pickTitleModel(settings: Settings): Promise<ModelRef | undefined>
   if (await providerReady(settings, 'groq')) {
     return {
       provider: 'groq',
-      model: settings.providers.groq?.defaultModel ?? GROQ_TITLE_MODEL,
+      model: GROQ_TITLE_MODEL,
     };
   }
   if (await providerReady(settings, 'openai')) {

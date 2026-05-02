@@ -1,0 +1,545 @@
+/*
+ * Web shell styles — shared by the landing page (/) and the demo
+ * page (/demo).
+ *
+ * The canvas nodes (.markdown-node), chat (.chat-panel, .message),
+ * and theme tokens (--bg, --accent, etc.) are reused from src/App.css
+ * so any future visual change to the Mac app flows into both web pages
+ * for free.
+ *
+ * Only the marketing-shell chrome (header, hero, features, download CTA,
+ * how-it-works, footer) lives here.
+ */
+
+:root {
+  --demo-page-bg: #ffffff;
+  --demo-page-bg-soft: #f6f6f7;
+  --demo-page-line: #e6e6ea;
+  --demo-page-text: #14141a;
+  --demo-page-text-mute: #6b6b75;
+  --demo-cta-bg: #14141a;
+  --demo-cta-bg-hover: #2a2a32;
+  --demo-cta-fg: #ffffff;
+  --demo-stage-shadow: 0 30px 80px -32px rgba(20, 20, 26, 0.18),
+    0 6px 24px -12px rgba(20, 20, 26, 0.08);
+}
+
+html,
+body {
+  background: var(--demo-page-bg);
+}
+
+body {
+  color: var(--demo-page-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.demo-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--demo-page-bg);
+}
+
+/* ---------- Header ---------- */
+
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px clamp(20px, 6vw, 64px);
+  border-bottom: 1px solid var(--demo-page-line);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: saturate(140%) blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.demo-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--demo-page-text);
+}
+.demo-brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--demo-page-text);
+  color: #fff;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+.demo-brand-name {
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-weight: 600;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+.demo-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.demo-header-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--demo-page-text-mute);
+  background: transparent;
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.demo-header-icon-btn:hover {
+  color: var(--demo-page-text);
+  background: var(--demo-page-bg-soft);
+  border-color: var(--demo-page-line);
+}
+.demo-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: var(--demo-cta-bg);
+  color: var(--demo-cta-fg);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  transition: background 120ms ease, transform 120ms ease;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 6px 18px -8px rgba(20, 20, 26, 0.45);
+}
+.demo-download-btn:hover {
+  background: var(--demo-cta-bg-hover);
+  transform: translateY(-1px);
+}
+.demo-download-btn:active {
+  transform: translateY(0);
+}
+
+/* ---------- Hero ---------- */
+
+.demo-hero {
+  padding: clamp(40px, 8vw, 96px) clamp(20px, 6vw, 64px) clamp(24px, 4vw, 48px);
+  max-width: 940px;
+  margin: 0 auto;
+  text-align: center;
+}
+.demo-hero-eyebrow {
+  margin: 0 0 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+  color: var(--demo-page-text-mute);
+}
+.demo-hero-title {
+  margin: 0 0 18px;
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-weight: 600;
+  font-size: clamp(36px, 6vw, 64px);
+  line-height: 1.04;
+  letter-spacing: -0.025em;
+  color: var(--demo-page-text);
+}
+.demo-hero-sub {
+  margin: 0 auto 28px;
+  max-width: 620px;
+  font-size: clamp(15px, 1.5vw, 18px);
+  line-height: 1.55;
+  color: var(--demo-page-text-mute);
+}
+.demo-cta-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.demo-cta-primary {
+  padding: 13px 22px;
+  border-radius: 12px;
+  background: var(--demo-cta-bg);
+  color: var(--demo-cta-fg);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  transition: background 120ms ease, transform 120ms ease;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 12px 28px -10px rgba(20, 20, 26, 0.45);
+}
+.demo-cta-primary:hover {
+  background: var(--demo-cta-bg-hover);
+  transform: translateY(-1px);
+}
+.demo-cta-primary:active {
+  transform: translateY(0);
+}
+.demo-cta-secondary {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--demo-page-text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--demo-page-line);
+  padding-bottom: 2px;
+  transition: border-color 120ms ease;
+}
+.demo-cta-secondary:hover {
+  border-color: var(--demo-page-text);
+}
+.demo-cta-meta {
+  margin-top: 18px;
+  font-size: 12px;
+  color: var(--demo-page-text-mute);
+  letter-spacing: 0.02em;
+}
+
+/* ---------- Stage (canvas + chat) ---------- */
+
+.demo-stage {
+  margin: 0 clamp(20px, 6vw, 64px) clamp(40px, 6vw, 72px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
+  gap: 0;
+  height: clamp(440px, 60vh, 620px);
+  border: 1px solid var(--demo-page-line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--bg, #fbf6ec);
+  box-shadow: var(--demo-stage-shadow);
+}
+/* Tighter stage used on the landing as a teaser preview. */
+.demo-stage.demo-stage-preview {
+  height: clamp(360px, 48vh, 460px);
+  margin-bottom: clamp(20px, 3vw, 32px);
+}
+/* Full-bleed stage on the dedicated /demo page. */
+.demo-stage.demo-stage-full {
+  height: clamp(540px, 72vh, 760px);
+  margin-bottom: clamp(28px, 4vw, 48px);
+}
+.demo-stage-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+.demo-stage-chat {
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border, var(--demo-page-line));
+}
+
+@media (max-width: 820px) {
+  .demo-stage {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .demo-stage-canvas {
+    height: 60vh;
+    min-height: 360px;
+  }
+  .demo-stage-chat {
+    height: 50vh;
+    min-height: 320px;
+    border-left: none;
+    border-top: 1px solid var(--border, var(--demo-page-line));
+  }
+}
+
+.demo-canvas-wrapper {
+  position: absolute;
+  inset: 0;
+  outline: none;
+}
+.demo-canvas-hint {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border, var(--demo-page-line));
+  border-radius: 999px;
+  color: var(--text-mute, var(--demo-page-text-mute));
+  font-size: 12px;
+  letter-spacing: -0.005em;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.demo-canvas-hint-kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg-soft, #f0e8d4);
+  border: 1px solid var(--border, var(--demo-page-line));
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--text, var(--demo-page-text));
+}
+
+/* ---------- Chat panel tweaks (demo-only chrome) ---------- */
+
+.demo-chat {
+  height: 100%;
+}
+.demo-chat-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border, var(--demo-page-line));
+  background: var(--bg-soft, #f6f0df);
+}
+.demo-chat-title {
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text, var(--demo-page-text));
+}
+.demo-chat-meta {
+  font-size: 11px;
+  color: var(--text-mute, var(--demo-page-text-mute));
+}
+.demo-chat-composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border, var(--demo-page-line));
+  background: var(--bg, #fbf6ec);
+}
+.demo-chat-composer-input {
+  flex: 1;
+  padding: 9px 12px;
+  border: 1px solid var(--border, var(--demo-page-line));
+  border-radius: 10px;
+  background: var(--bg-soft, #f6f0df);
+  color: var(--text-mute, var(--demo-page-text-mute));
+  font-size: 13px;
+}
+.demo-chat-composer-send {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--text, var(--demo-page-text));
+  color: #fff;
+  border: none;
+  font-size: 14px;
+  cursor: default;
+}
+
+/* The .message component reuses class names from App.css; we add only
+   small demo-scoped tweaks for an inline-title bubble. */
+.demo-chat .message .title {
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-weight: 600;
+  font-size: 13px;
+  margin: 2px 0 4px;
+  color: var(--text, var(--demo-page-text));
+}
+
+/* ---------- Features ---------- */
+
+.demo-features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(16px, 2vw, 28px);
+  padding: 0 clamp(20px, 6vw, 64px) clamp(48px, 6vw, 80px);
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+}
+@media (max-width: 760px) {
+  .demo-features {
+    grid-template-columns: 1fr;
+  }
+}
+.demo-feature {
+  padding: 22px 24px;
+  border: 1px solid var(--demo-page-line);
+  border-radius: 14px;
+  background: var(--demo-page-bg-soft);
+}
+.demo-feature-title {
+  margin: 0 0 8px;
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--demo-page-text);
+}
+.demo-feature-desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--demo-page-text-mute);
+}
+
+/* ---------- Section header (above features / how-it-works) ---------- */
+
+.demo-section-head {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(24px, 4vw, 48px) clamp(20px, 6vw, 64px) 16px;
+}
+.demo-section-eyebrow {
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+  color: var(--demo-page-text-mute);
+}
+.demo-section-title {
+  margin: 0;
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: clamp(22px, 2.5vw, 30px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--demo-page-text);
+}
+
+/* ---------- How it works ---------- */
+
+.demo-howitworks {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(16px, 2vw, 28px);
+  padding: 0 clamp(20px, 6vw, 64px) clamp(48px, 6vw, 80px);
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+}
+@media (max-width: 900px) {
+  .demo-howitworks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .demo-howitworks {
+    grid-template-columns: 1fr;
+  }
+}
+.demo-step {
+  padding: 18px 20px;
+  border: 1px solid var(--demo-page-line);
+  border-radius: 12px;
+  background: var(--demo-page-bg);
+}
+.demo-step-num {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--demo-page-text);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.demo-step-title {
+  margin: 0 0 6px;
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--demo-page-text);
+  letter-spacing: -0.005em;
+}
+.demo-step-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--demo-page-text-mute);
+}
+
+/* ---------- Demo-page-specific ---------- */
+
+.demo-page-intro {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: clamp(22px, 4vw, 36px) clamp(20px, 6vw, 64px) clamp(14px, 2vw, 22px);
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+}
+.demo-page-title {
+  margin: 0;
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: clamp(22px, 3vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--demo-page-text);
+}
+.demo-page-sub {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--demo-page-text-mute);
+  max-width: 540px;
+}
+.demo-back-link {
+  font-size: 13px;
+  text-decoration: none;
+  color: var(--demo-page-text-mute);
+  transition: color 120ms ease;
+}
+.demo-back-link:hover {
+  color: var(--demo-page-text);
+}
+.demo-page-outro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 0 clamp(20px, 6vw, 64px) clamp(48px, 6vw, 72px);
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+}
+.demo-page-outro-text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--demo-page-text-mute);
+  max-width: 520px;
+  line-height: 1.55;
+}
+
+/* ---------- Footer ---------- */
+
+.demo-footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 24px clamp(20px, 6vw, 64px);
+  border-top: 1px solid var(--demo-page-line);
+  background: var(--demo-page-bg);
+  font-size: 13px;
+  color: var(--demo-page-text-mute);
+}
+.demo-footer-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.demo-footer-link {
+  color: var(--demo-page-text);
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 1px solid currentColor;
+}

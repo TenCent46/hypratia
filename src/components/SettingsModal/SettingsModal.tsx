@@ -18,6 +18,11 @@ import {
   validateMarkdownStorageDir,
 } from '../../services/export/markdownStorage';
 import type { ProviderId, Theme } from '../../types';
+import {
+  CANVAS_FONT_SIZE_DEFAULT,
+  CANVAS_FONT_SIZE_MAX,
+  CANVAS_FONT_SIZE_MIN,
+} from '../../types';
 
 type Tab = 'providers' | 'usage' | 'appearance' | 'vault' | 'workflow' | 'about';
 
@@ -971,7 +976,75 @@ function ConversationMapSection() {
           <option value="llm">LLM only</option>
         </select>
       </div>
+      <CanvasFontSizeRow />
     </section>
+  );
+}
+
+function CanvasFontSizeRow() {
+  const stored = useStore((s) => s.settings.canvasFontSize);
+  const setCanvasFontSize = useStore((s) => s.setCanvasFontSize);
+  const value = stored ?? CANVAS_FONT_SIZE_DEFAULT;
+  // Local draft only while the number input has focus, so partial
+  // typing (e.g. "" mid-backspace, or "1" before "12") doesn't get
+  // clobbered by the store's clamp. When not editing, the displayed
+  // value is derived directly from the store — slider drags and the
+  // Reset button update the field with no extra wiring.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  const display = editing ? draft : String(value);
+  function commit(raw: string) {
+    const n = Math.round(Number(raw));
+    if (Number.isFinite(n)) setCanvasFontSize(n);
+    setEditing(false);
+  }
+  return (
+    <div className="settings-row settings-row-canvas-font">
+      <label htmlFor="canvas-font-size-input">Canvas text size</label>
+      <div className="canvas-font-controls">
+        <input
+          id="canvas-font-size-slider"
+          type="range"
+          min={CANVAS_FONT_SIZE_MIN}
+          max={CANVAS_FONT_SIZE_MAX}
+          step={1}
+          value={value}
+          onChange={(e) => setCanvasFontSize(Number(e.target.value))}
+          aria-label="Canvas text size slider"
+        />
+        <input
+          id="canvas-font-size-input"
+          type="number"
+          min={CANVAS_FONT_SIZE_MIN}
+          max={CANVAS_FONT_SIZE_MAX}
+          step={1}
+          value={display}
+          onFocus={() => {
+            setDraft(String(value));
+            setEditing(true);
+          }}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commit((e.target as HTMLInputElement).value);
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+        />
+        <span className="canvas-font-unit">px</span>
+        <button
+          type="button"
+          className="canvas-font-reset"
+          onClick={() => setCanvasFontSize(CANVAS_FONT_SIZE_DEFAULT)}
+          disabled={value === CANVAS_FONT_SIZE_DEFAULT}
+          title={`Reset to ${CANVAS_FONT_SIZE_DEFAULT}px`}
+        >
+          Reset
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -1563,31 +1563,32 @@ input::placeholder {
 }
 .editor-mode-switch {
   display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-right: 6px;
+  border-radius: 7px;
+  background: var(--bg-soft);
 }
 .editor-mode-switch button {
   border: none;
   background: transparent;
   color: var(--text-mute);
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 0 8px;
   cursor: pointer;
-  letter-spacing: 0.3px;
-}
-.editor-mode-switch button + button {
-  border-left: 1px solid var(--border);
+  letter-spacing: 0;
+  border-radius: 5px;
 }
 .editor-mode-switch button:hover {
-  background: var(--bg-soft);
+  background: var(--bg);
   color: var(--text);
 }
 .editor-mode-switch button.active {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--bg);
+  color: var(--text);
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .editor-context-menu hr.editor-context-separator {
   border: none;
@@ -2896,13 +2897,13 @@ input::placeholder {
 .markdown-node .title {
   font-family: var(--font-serif);
   font-weight: 600;
-  font-size: 14px;
+  font-size: calc(var(--canvas-font-size, 13px) + 1px);
   word-break: break-word;
   flex: 1;
   min-width: 0;
 }
 .markdown-node .content {
-  font-size: 13px;
+  font-size: var(--canvas-font-size, 13px);
   line-height: 1.45;
   color: var(--text);
   word-break: break-word;
@@ -2920,7 +2921,7 @@ input::placeholder {
   background: var(--code-bg);
   padding: 1px 4px;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: calc(var(--canvas-font-size, 13px) - 1px);
 }
 .markdown-node .content pre {
   background: var(--code-bg);
@@ -3483,10 +3484,8 @@ input::placeholder {
   color: var(--text);
 }
 .composer-menu-wrap {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 50;
+  position: fixed;
+  z-index: 260;
 }
 .composer-menu,
 .composer-submenu {
@@ -3517,13 +3516,18 @@ input::placeholder {
 }
 .composer-submenu-wrap {
   position: absolute;
-  left: calc(100% + 6px);
   top: -6px;
   z-index: 51;
-  /* Bridge the gap so the cursor can travel from item → submenu without
-     leaving the hover area. */
+}
+.composer-submenu-wrap.side-right {
+  left: calc(100% + 6px);
   padding-left: 6px;
   margin-left: -6px;
+}
+.composer-submenu-wrap.side-left {
+  right: calc(100% + 6px);
+  padding-right: 6px;
+  margin-right: -6px;
 }
 .composer-menu-item {
   display: flex;
@@ -4370,7 +4374,6 @@ input::placeholder {
   display: none;
   position: absolute;
   top: -4px;
-  left: calc(100% - 4px);
   min-width: 240px;
   padding: 4px;
   border: 1px solid var(--border);
@@ -4381,9 +4384,16 @@ input::placeholder {
     0 12px 32px rgba(15, 23, 42, 0.18);
   color: var(--text);
 }
+.app-context-submenu-body.open,
 .app-context-submenu:hover > .app-context-submenu-body,
 .app-context-submenu:focus-within > .app-context-submenu-body {
   display: block;
+}
+.app-context-submenu-body.side-right {
+  left: calc(100% - 4px);
+}
+.app-context-submenu-body.side-left {
+  right: calc(100% - 4px);
 }
 .app-context-submenu:hover > .app-context-menu-item {
   background: var(--accent);
@@ -4728,7 +4738,7 @@ input::placeholder {
   height: 100%;
   resize: none;
   padding: 10px 12px;
-  font-size: 13px;
+  font-size: var(--canvas-font-size, 13px);
   line-height: 1.5;
 }
 .markdown-editor.compact .markdown-editor-preview {
@@ -4736,6 +4746,7 @@ input::placeholder {
   height: 100%;
   padding: 10px 12px;
   overflow: auto;
+  font-size: var(--canvas-font-size, 13px);
 }
 .markdown-editor.compact .markdown-editor-status {
   padding: 3px 8px;
@@ -5409,6 +5420,43 @@ input::placeholder {
   background: var(--bg);
   color: var(--text);
   font: inherit;
+}
+.canvas-font-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.canvas-font-controls input[type='range'] {
+  flex: 1;
+  min-width: 120px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.canvas-font-controls input[type='number'] {
+  width: 64px;
+  text-align: right;
+}
+.canvas-font-controls input[type='number']::-webkit-outer-spin-button,
+.canvas-font-controls input[type='number']::-webkit-inner-spin-button {
+  opacity: 1;
+}
+.canvas-font-unit {
+  color: var(--text-mute);
+  font-size: 12px;
+}
+.canvas-font-reset {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.canvas-font-reset:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .settings-section h3 {
   margin: 0 0 6px;

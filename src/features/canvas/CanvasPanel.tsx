@@ -476,6 +476,9 @@ export function CanvasPanel({
           selected: isSelected,
           style: Object.keys(baseStyle).length > 0 ? baseStyle : undefined,
           className: e.kind ? `edge-kind-${e.kind}` : undefined,
+          // Widen the invisible hit-target stroke so right-click reliably
+          // lands on the curved path (default 20px is narrow at low zoom).
+          interactionWidth: 28,
         };
       });
   }, [storeEdges, storeNodes, rfNodes, selectedEdgeIds]);
@@ -1332,6 +1335,14 @@ export function CanvasPanel({
           } else {
             setCtxMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
           }
+        }}
+        onEdgeClick={() => {
+          // No-op handler exists solely so React Flow's `inactive` rule
+          // (`!isSelectable && !onClick`) never fires. Without it, edges
+          // get `pointer-events: none` whenever `elementsSelectable=false`
+          // (i.e. hand-tool mode), which silently breaks the right-click
+          // context menu. We don't want clicks to do anything special here
+          // — selection still happens through React Flow's own machinery.
         }}
         onEdgeContextMenu={(e, edge) => {
           // Right-click on an edge: if it's already in the selection,

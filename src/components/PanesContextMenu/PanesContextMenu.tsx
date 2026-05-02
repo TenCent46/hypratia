@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AppContextMenuItem as Item,
   AppContextMenuSeparator as Separator,
 } from '../ContextMenu/AppContextMenuItem';
 import { useClampedMenuPosition } from '../../hooks/useClampedMenuPosition';
+import { useAdaptiveSubmenuPosition } from '../../hooks/useAdaptiveSubmenuPosition';
 
 export type PaneMenuControl = {
   id: string;
@@ -49,8 +50,22 @@ export function PaneMenuSubmenu({
   onSelect?: () => void;
   label?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const pos = useAdaptiveSubmenuPosition(triggerRef, bodyRef, open);
+
   return (
-    <div className="app-context-submenu">
+    <div
+      ref={triggerRef}
+      className="app-context-submenu"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
+      }}
+    >
       <button type="button" className="app-context-menu-item" role="menuitem">
         <span className="app-context-menu-check" aria-hidden="true" />
         <span className="app-context-menu-label">{label}</span>
@@ -58,9 +73,16 @@ export function PaneMenuSubmenu({
           ›
         </span>
       </button>
-      <div className="app-context-submenu-body" role="menu">
-        <PaneMenuItems items={items} onSelect={onSelect} />
-      </div>
+      {open ? (
+        <div
+          ref={bodyRef}
+          className={`app-context-submenu-body open side-${pos.side}`}
+          role="menu"
+          style={{ top: pos.top }}
+        >
+          <PaneMenuItems items={items} onSelect={onSelect} />
+        </div>
+      ) : null}
     </div>
   );
 }

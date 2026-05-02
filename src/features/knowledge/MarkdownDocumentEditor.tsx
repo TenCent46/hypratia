@@ -18,6 +18,9 @@ import { EditorSidePanel } from './editor/EditorSidePanel';
 import { PropertiesEditor } from './editor/PropertiesEditor';
 import { findAnchorLine } from './editor/sidePanel';
 import { reimportMarkdownIntoChat } from '../../services/knowledge/conversationMarkdownReimport';
+import { KbReadingView } from './editor/KbReadingView';
+
+type EditorMode = 'live-preview' | 'source' | 'reading';
 
 function fileNameFromPath(path: string): string {
   const parts = path.split('/').filter(Boolean);
@@ -80,6 +83,7 @@ export function MarkdownDocumentEditor({
   // so the editor opens with the document text taking the full width.
   // The user can expand it by clicking any tab icon on the rail.
   const [sidePanelVisible, setSidePanelVisible] = useState(false);
+  const [editorMode, setEditorMode] = useState<EditorMode>('live-preview');
   const [reimportToast, setReimportToast] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState(() => stemFromPath(path));
   const [insertPrompt, setInsertPrompt] = useState<{
@@ -345,17 +349,14 @@ export function MarkdownDocumentEditor({
       path,
       save: () => void save(),
       close: requestClose,
-      // toggleMode is a legacy field; Live Preview is the only mode now,
-      // so the callback is a no-op that satisfies the registry signature.
-      toggleMode: () => {},
+      toggleMode: setEditorMode,
       isDirty: () => dirty,
       openInCanvas,
     });
-  }, [dirty, openInCanvas, path, requestClose, save]);
+  }, [dirty, editorMode, openInCanvas, path, requestClose, save]);
 
   // Listen for save / close / re-import commands dispatched by
-  // useCommands.ts. The mode-toggle event is intentionally ignored —
-  // legacy callers may still emit it but Live Preview is the only mode.
+  // useCommands.ts.
   useEffect(() => {
     function onSave() {
       void save();
@@ -613,6 +614,23 @@ export function MarkdownDocumentEditor({
               Window
             </button>
           ) : null}
+          <div className="editor-mode-switch" role="group" aria-label="Markdown editor mode">
+            {([
+              ['live-preview', 'Preview'],
+              ['source', 'Code'],
+              ['reading', 'Read'],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                className={editorMode === mode ? 'active' : ''}
+                onClick={() => setEditorMode(mode)}
+                aria-pressed={editorMode === mode}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={requestClose}
@@ -676,16 +694,22 @@ export function MarkdownDocumentEditor({
                 doc={content}
                 onChange={handleContentChange}
               />
-              {documentReady ? (
+              {documentReady && editorMode !== 'reading' ? (
                 <MarkdownEditorView
                   ref={editorRef}
                   initialDoc={content}
                   filePath={path}
                   rootPath={rootPath}
+                  mode={editorMode}
                   onChange={handleContentChange}
                   onSave={() => void save()}
                   onContextMenu={onContextMenu}
                 />
+              ) : null}
+              {documentReady && editorMode === 'reading' ? (
+                <div className="markdown-document-reader-host">
+                  <KbReadingView source={content} rootPath={rootPath} />
+                </div>
               ) : null}
             </div>
           </div>
@@ -815,4 +839,3 @@ export function MarkdownDocumentEditor({
 // resolve the link under the cursor. Keeping the import alive here means
 // the commands module does not need to know about wikilink internals.
 void resolveKbWikilinkTarget;
-

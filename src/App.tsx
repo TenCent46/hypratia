@@ -32,6 +32,7 @@ import { PdfViewer } from './features/pdf/PdfViewer';
 import { Onboarding } from './components/Onboarding/Onboarding';
 import { hydrateAndWire } from './store/persistence';
 import { useStore } from './store';
+import { CANVAS_FONT_SIZE_DEFAULT } from './types';
 import { useKeymap } from './services/commands/useKeymap';
 import { useMenu, type LayoutControls } from './services/commands/useMenu';
 import { setMenuCheck } from './services/menu';
@@ -113,6 +114,7 @@ function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const theme = useStore((s) => s.settings.theme);
+  const canvasFontSize = useStore((s) => s.settings.canvasFontSize);
 
   useEffect(() => {
     console.info('[mc:loading] App splash — hydrateAndWire start');
@@ -151,6 +153,14 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme ?? 'light');
   }, [theme]);
+
+  useEffect(() => {
+    const px = canvasFontSize ?? CANVAS_FONT_SIZE_DEFAULT;
+    document.documentElement.style.setProperty(
+      '--canvas-font-size',
+      `${px}px`,
+    );
+  }, [canvasFontSize]);
 
   if (error) return <div className="splash error">Failed to load: {error}</div>;
   if (!ready) return <div className="splash">Loading…</div>;
@@ -745,19 +755,6 @@ function ReadyApp() {
       );
     };
   }, [openKnowledgeFilePreview]);
-
-  useEffect(() => {
-    if (!layoutMenu) return;
-    function close() {
-      setLayoutMenu(null);
-    }
-    window.addEventListener('pointerdown', close, { once: true });
-    window.addEventListener('keydown', close, { once: true });
-    return () => {
-      window.removeEventListener('pointerdown', close);
-      window.removeEventListener('keydown', close);
-    };
-  }, [layoutMenu]);
 
   const visiblePanes = useMemo<PaneId[]>(() => {
     const panes: PaneId[] = [];

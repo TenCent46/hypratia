@@ -1,9 +1,10 @@
-import { exists, rename } from '@tauri-apps/plugin-fs';
 import type { Attachment, Conversation, ID, Project } from '../../types';
 import { useStore } from '../../store';
 import {
   absoluteMarkdownPath,
   ensureFolderPath,
+  pathExists,
+  renameFile,
   resolveMarkdownRoot,
 } from '../storage/MarkdownFileService';
 import {
@@ -26,7 +27,7 @@ async function uniqueRelPath(rootPath: string, dir: string, filename: string): P
   const stem = dot > 0 ? filename.slice(0, dot) : filename;
   const ext = dot > 0 ? filename.slice(dot) : '';
   let candidate = `${dir}/${filename}`;
-  for (let i = 2; await exists(await absoluteMarkdownPath(rootPath, candidate)); i += 1) {
+  for (let i = 2; await pathExists(await absoluteMarkdownPath(rootPath, candidate)); i += 1) {
     candidate = `${dir}/${stem} (${i})${ext}`;
   }
   return candidate;
@@ -116,13 +117,13 @@ export async function moveConversationProjectFiles(
 
     try {
       const from = await absoluteMarkdownPath(rootPath, att.relPath);
-      if (!(await exists(from))) {
+      if (!(await pathExists(from))) {
         skipped += 1;
         continue;
       }
       const nextRelPath = await uniqueRelPath(rootPath, targetRawDir, basename(att.relPath));
       const to = await absoluteMarkdownPath(rootPath, nextRelPath);
-      await rename(from, to);
+      await renameFile(from, to);
       updateAttachment(att.id, { relPath: nextRelPath });
       moved += 1;
     } catch (err) {

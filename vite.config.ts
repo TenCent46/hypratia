@@ -29,4 +29,19 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  build: {
+    // Multi-page build:
+    //   - `index.html`         → Tauri desktop shell (Mac app)
+    //   - `index.landing.html` → public marketing landing (`/` on Vercel)
+    //   - `index.demo.html`    → standalone canvas demo (`/demo` on Vercel)
+    // All ship from `dist/` after `pnpm build`.
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        landing: "index.landing.html",
+        demo: "index.demo.html",
+      },
+    },
+  },
 }));

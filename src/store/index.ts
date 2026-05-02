@@ -18,6 +18,7 @@ import type {
   Theme,
   Viewport,
 } from '../types';
+import { CANVAS_FONT_SIZE_MAX, CANVAS_FONT_SIZE_MIN } from '../types';
 import type { ArtifactUsageRecord } from '../services/artifacts';
 import { newId } from '../lib/ids';
 import { now } from '../lib/time';
@@ -169,6 +170,7 @@ type State = {
   setCanvasTool: (tool: CanvasTool) => void;
   setCanvasWheelMode: (mode: 'pan' | 'zoom') => void;
   setThemesClassifier: (mode: 'auto' | 'heuristic' | 'llm') => void;
+  setCanvasFontSize: (size: number) => void;
 
   createConversation: (title?: string, projectId?: ID) => ID;
   ensureConversation: () => ID;
@@ -517,6 +519,19 @@ export const useStore = create<State>()(
     setThemesClassifier: (mode) =>
       set((s) => ({
         settings: { ...s.settings, themesClassifier: mode },
+      })),
+
+    setCanvasFontSize: (size) =>
+      set((s) => ({
+        settings: {
+          ...s.settings,
+          canvasFontSize: Math.round(
+            Math.max(
+              CANVAS_FONT_SIZE_MIN,
+              Math.min(CANVAS_FONT_SIZE_MAX, size),
+            ),
+          ),
+        },
       })),
 
     createConversation: (title = 'Untitled', projectId) => {

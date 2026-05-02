@@ -2,13 +2,14 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
 
+export type MarkdownEditorMode = 'live-preview' | 'source';
+
 /**
- * Markdown highlight style. Live Preview is the only editor mode, so we
- * keep one Obsidian-leaning palette: large headings, distinct emphasis
- * colours, monospaced code, dimmed punctuation. Colours pull from the
- * app's CSS custom properties (see `src/App.css`) so the themes track.
+ * Markdown highlight style for Live Preview: large headings, distinct
+ * emphasis colours, monospaced code, dimmed punctuation. Colours pull
+ * from the app's CSS custom properties so the themes track.
  */
-export const kbHighlightStyle = HighlightStyle.define([
+export const kbLivePreviewHighlightStyle = HighlightStyle.define([
   { tag: t.heading1, fontSize: '1.7em', fontWeight: '700', lineHeight: '1.2' },
   { tag: t.heading2, fontSize: '1.4em', fontWeight: '700', lineHeight: '1.25' },
   { tag: t.heading3, fontSize: '1.2em', fontWeight: '600' },
@@ -32,7 +33,22 @@ export const kbHighlightStyle = HighlightStyle.define([
   { tag: t.meta, color: 'var(--text-mute)' },
 ]);
 
-/** CodeMirror theme for Live Preview. Hooks into app CSS variables. */
+/** Source mode keeps Markdown readable as code instead of prose. */
+export const kbSourceHighlightStyle = HighlightStyle.define([
+  { tag: t.heading, color: 'var(--accent)', fontWeight: '600' },
+  { tag: t.strong, fontWeight: '700' },
+  { tag: t.emphasis, fontStyle: 'italic' },
+  { tag: t.strikethrough, textDecoration: 'line-through' },
+  { tag: t.link, color: 'var(--accent)' },
+  { tag: t.url, color: 'var(--accent)' },
+  { tag: t.monospace, color: 'var(--text)' },
+  { tag: t.quote, color: 'var(--text-mute)' },
+  { tag: t.processingInstruction, color: 'var(--text-mute)' },
+  { tag: t.contentSeparator, color: 'var(--text-mute)' },
+  { tag: t.meta, color: 'var(--text-mute)' },
+]);
+
+/** CodeMirror theme for the document editor. Hooks into app CSS variables. */
 export const kbLivePreviewTheme = EditorView.theme(
   {
     '&': {
@@ -90,6 +106,58 @@ export const kbLivePreviewTheme = EditorView.theme(
   { dark: false },
 );
 
-export function kbThemeExtension() {
-  return [kbLivePreviewTheme, syntaxHighlighting(kbHighlightStyle)];
+export const kbSourceTheme = EditorView.theme(
+  {
+    '&': {
+      backgroundColor: 'transparent',
+      color: 'var(--text)',
+      height: '100%',
+    },
+    '.cm-scroller': {
+      fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+      fontSize: '13px',
+      lineHeight: '1.65',
+      padding: '14px 0 64px',
+    },
+    '.cm-content': {
+      maxWidth: '900px',
+      margin: '0 auto',
+      caretColor: 'var(--accent)',
+      whiteSpace: 'pre-wrap',
+    },
+    '.cm-line': {
+      padding: '0 4px',
+    },
+    '.cm-activeLine': {
+      backgroundColor: 'color-mix(in srgb, var(--bg-soft) 65%, transparent)',
+    },
+    '.cm-cursor': {
+      borderLeftColor: 'var(--accent)',
+    },
+    '&.cm-focused .cm-selectionBackground, ::selection': {
+      backgroundColor: 'var(--accent-soft)',
+    },
+    '.cm-kb-wikilink': {
+      color: 'var(--accent)',
+      textDecoration: 'underline',
+      textDecorationStyle: 'dotted',
+      cursor: 'pointer',
+    },
+    '.cm-kb-wikilink-broken': {
+      color: 'var(--danger)',
+      textDecorationStyle: 'wavy',
+    },
+    '.cm-md-link': {
+      color: 'var(--accent)',
+      textDecoration: 'underline',
+      cursor: 'pointer',
+    },
+  },
+  { dark: false },
+);
+
+export function kbThemeExtension(mode: MarkdownEditorMode = 'live-preview') {
+  return mode === 'source'
+    ? [kbSourceTheme, syntaxHighlighting(kbSourceHighlightStyle)]
+    : [kbLivePreviewTheme, syntaxHighlighting(kbLivePreviewHighlightStyle)];
 }

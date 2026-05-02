@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
+import { exists, rename } from '@tauri-apps/plugin-fs';
 import { resolveMarkdownStorageDir } from '../export/markdownStorage';
 
 export type MarkdownTreeNode = {
@@ -130,6 +131,28 @@ export async function tryReadMarkdownFile(
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a file or folder exists at the given absolute path. Wraps
+ * `@tauri-apps/plugin-fs`'s `exists` so the rest of the app can check
+ * vault paths without importing the Tauri plugin directly (the eslint
+ * `no-restricted-imports` rule keeps platform calls inside this layer).
+ */
+export async function pathExists(absolutePath: string): Promise<boolean> {
+  return await exists(absolutePath);
+}
+
+/**
+ * Move/rename a file using absolute paths. Used when the relative-path
+ * Rust command is too narrow — e.g. moving an attachment between
+ * project subtrees keeps the basename but switches the parent folder.
+ */
+export async function renameFile(
+  absoluteFrom: string,
+  absoluteTo: string,
+): Promise<void> {
+  await rename(absoluteFrom, absoluteTo);
 }
 
 /**

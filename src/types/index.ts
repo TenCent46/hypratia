@@ -273,7 +273,17 @@ export type Settings = {
    * otherwise. `heuristic` and `llm` force a single mode. See spec 32.
    */
   themesClassifier?: 'auto' | 'heuristic' | 'llm';
+  /**
+   * Body-text font size (px) for canvas markdown nodes. Bulk control —
+   * scales node body, inline editor, and proportionally adjusts title /
+   * inline-code via calc(). Default 13.
+   */
+  canvasFontSize?: number;
 };
+
+export const CANVAS_FONT_SIZE_DEFAULT = 13;
+export const CANVAS_FONT_SIZE_MIN = 8;
+export const CANVAS_FONT_SIZE_MAX = 32;
 
 /**
  * Knowledge Base editor mode.

@@ -26,7 +26,10 @@ import {
 } from './extensions/wikilink';
 import { frontmatterFold } from './extensions/frontmatterFold';
 import { markdownLinkClick } from './extensions/markdownLinkClick';
-import { kbThemeExtension } from './extensions/theme';
+import {
+  kbThemeExtension,
+  type MarkdownEditorMode,
+} from './extensions/theme';
 import {
   livePreviewMarkerFold,
   livePreviewWidgets,
@@ -53,13 +56,14 @@ type Props = {
   initialDoc: string;
   filePath: string;
   rootPath: string;
+  mode: MarkdownEditorMode;
   onChange: (doc: string) => void;
   onSave: () => void;
   onContextMenu: (e: MouseEvent) => void;
 };
 
 function MarkdownEditorViewImpl(
-  { initialDoc, filePath, rootPath, onChange, onSave, onContextMenu }: Props,
+  { initialDoc, filePath, rootPath, mode, onChange, onSave, onContextMenu }: Props,
   ref: ForwardedRef<MarkdownEditorViewHandle>,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -107,7 +111,7 @@ function MarkdownEditorViewImpl(
             codeLanguages: () => null,
             addKeymap: false,
           }),
-          kbThemeExtension(),
+          kbThemeExtension(mode),
           smartWrapInputHandler(),
           autoLinkifyUrls(),
           pasteLinkOverSelection(),
@@ -123,8 +127,12 @@ function MarkdownEditorViewImpl(
             activateOnTyping: true,
           }),
           attachmentDrop(),
-          livePreviewMarkerFold(() => true),
-          livePreviewWidgets(() => rootPath, () => filePath),
+          ...(mode === 'live-preview'
+            ? [
+                livePreviewMarkerFold(() => true),
+                livePreviewWidgets(() => rootPath, () => filePath),
+              ]
+            : []),
           frontmatterFold(),
           ...pluginExtensions(),
           keymap.of([
@@ -166,7 +174,7 @@ function MarkdownEditorViewImpl(
     };
     // We deliberately rebuild the editor when the file path or root changes:
     // the initial document and wikilink closures are baked into the CM state.
-  }, [rootPath, filePath]);
+  }, [rootPath, filePath, mode]);
 
   useImperativeHandle(
     ref,
@@ -198,7 +206,7 @@ function MarkdownEditorViewImpl(
     [],
   );
 
-  return <div ref={hostRef} className="markdown-cm-host" />;
+  return <div ref={hostRef} className={`markdown-cm-host mode-${mode}`} />;
 }
 
 export const MarkdownEditorView = forwardRef(MarkdownEditorViewImpl);

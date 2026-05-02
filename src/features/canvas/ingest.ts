@@ -6,6 +6,7 @@ import { defaultMarkdownNodeSize } from './MarkdownNode';
 import { resolveMarkdownRoot, markdownFiles } from '../../services/storage/MarkdownFileService';
 import { ensureNodeMarkdownPath } from '../../services/markdown/MarkdownContextResolver';
 import { isMirrorManagedPath } from '../../services/knowledge/knowledgeBaseLayout';
+import { autoTitleNode } from '../../services/chat/autoTitle';
 
 export type IngestedCanvasFile = {
   attachment: Attachment;
@@ -275,6 +276,13 @@ export async function pasteToCanvas(
     width: size.width,
     height: size.height,
     tags: ['pasted'],
+  });
+  void autoTitleNode({
+    nodeId: node.id,
+    kind: 'note',
+    force: true,
+  }).catch((err) => {
+    console.warn('[paste] auto title failed', err);
   });
   void persistMarkdownNodeToVault(node.id);
   return { created: 1, kind };

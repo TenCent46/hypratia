@@ -1,10 +1,13 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
   type RefObject,
 } from 'react';
+import { createPortal } from 'react-dom';
+import { useAdaptiveSubmenuPosition } from '../../../hooks/useAdaptiveSubmenuPosition';
 import { ComposerActionMenuItem } from './ComposerActionMenuItem';
 import { SkillSubmenu } from './SkillMenuPlaceholder';
 import { ConnectorSubmenu } from './ConnectorMenuPlaceholder';
@@ -24,6 +27,8 @@ import type { ComposerMode } from './ComposerMode';
 
 type Submenu = 'project' | 'skills' | 'connectors' | 'style' | null;
 const HOVER_LEAVE_DELAY_MS = 120;
+const POPOVER_GAP = 8;
+const VIEWPORT_PAD = 8;
 
 export function ComposerActionMenu({
   open,
@@ -43,6 +48,7 @@ export function ComposerActionMenu({
   const popoverRef = useRef<HTMLDivElement>(null);
   const [submenu, setSubmenu] = useState<Submenu>(null);
   const [activeStyleId, setActiveStyleId] = useState<string>('default');
+  const [popoverPos, setPopoverPos] = useState<{ left: number; top: number } | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // The menu is unmounted when `open` is false (we return null below), so
@@ -78,6 +84,49 @@ export function ComposerActionMenu({
     };
   }, [open, anchorRef, onClose, submenu]);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    function updatePosition() {
+      const anchor = anchorRef.current;
+      const popover = popoverRef.current;
+      if (!anchor || !popover) return;
+
+      const anchorRect = anchor.getBoundingClientRect();
+      const popoverRect = popover.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      const width = popoverRect.width || 280;
+      const height = popoverRect.height || 240;
+      let left = anchorRect.left;
+      let top = anchorRect.top - height - POPOVER_GAP;
+
+      if (top < VIEWPORT_PAD) {
+        top = anchorRect.bottom + POPOVER_GAP;
+      }
+      if (top + height + VIEWPORT_PAD > vh) {
+        top = Math.max(VIEWPORT_PAD, vh - height - VIEWPORT_PAD);
+      }
+      if (left + width + VIEWPORT_PAD > vw) {
+        left = Math.max(VIEWPORT_PAD, vw - width - VIEWPORT_PAD);
+      }
+      left = Math.max(VIEWPORT_PAD, left);
+
+      setPopoverPos((cur) =>
+        cur && cur.left === left && cur.top === top ? cur : { left, top },
+      );
+    }
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [anchorRef, open]);
+
   function scheduleClose(target: Submenu) {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     closeTimerRef.current = setTimeout(() => {
@@ -102,8 +151,16 @@ export function ComposerActionMenu({
     onClose();
   }
 
-  return (
-    <div className="composer-menu-wrap" ref={popoverRef}>
+  return createPortal(
+    <div
+      className="composer-menu-wrap"
+      ref={popoverRef}
+      style={
+        popoverPos
+          ? { left: popoverPos.left, top: popoverPos.top }
+          : { left: 0, top: 0, visibility: 'hidden' }
+      }
+    >
       <div className="composer-menu" role="menu" aria-label="Composer actions">
         <ComposerActionMenuItem
           icon={<PaperclipIcon />}
@@ -214,7 +271,8 @@ export function ComposerActionMenu({
           />
         </FlyoutItem>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -234,8 +292,14 @@ function FlyoutItem({
   children: ReactNode;
 }) {
   const isOpen = activeSubmenu === name;
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const pos = useAdaptiveSubmenuPosition(triggerRef, submenuRef, isOpen, {
+    topOffset: -6,
+  });
   return (
     <div
+      ref={triggerRef}
       className="composer-flyout"
       onMouseEnter={() => onOpen(name)}
       onMouseLeave={() => onScheduleClose(name)}
@@ -244,7 +308,9 @@ function FlyoutItem({
       {children}
       {isOpen ? (
         <div
-          className="composer-submenu-wrap"
+          ref={submenuRef}
+          className={`composer-submenu-wrap side-${pos.side}`}
+          style={{ top: pos.top }}
           // Cancel a pending close while the cursor is over the submenu.
           onMouseEnter={() => onOpen(name)}
           onMouseLeave={() => onScheduleClose(name)}
