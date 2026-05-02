@@ -5,6 +5,11 @@ import type { DemoFileNodeType } from './DemoFileNode';
 
 export type DemoNode = DemoMemoNodeType | DemoImageNodeType | DemoFileNodeType;
 
+/**
+ * Sample canvas state. String fields use i18n keys (resolved by the node
+ * components via `useLocale().t(key)`), so changing the language updates
+ * every existing node in place.
+ */
 export const initialNodes: DemoNode[] = [
   {
     id: 'root',
@@ -12,8 +17,8 @@ export const initialNodes: DemoNode[] = [
     position: { x: 260, y: 20 },
     style: { width: 260, height: 120 },
     data: {
-      title: 'Designing Hypratia',
-      body: 'A spatial memory layer for LLM conversations. Local-first, Mac-native, Markdown-backed.',
+      titleKey: 'sample.node.root.title',
+      bodyKey: 'sample.node.root.body',
     },
   },
   {
@@ -22,8 +27,8 @@ export const initialNodes: DemoNode[] = [
     position: { x: -40, y: 220 },
     style: { width: 240, height: 130 },
     data: {
-      title: 'Local-first',
-      body: 'Your conversations live on your machine, in plain Markdown. No accounts. No cloud lock-in.',
+      titleKey: 'sample.node.local.title',
+      bodyKey: 'sample.node.local.body',
     },
   },
   {
@@ -32,8 +37,8 @@ export const initialNodes: DemoNode[] = [
     position: { x: 260, y: 220 },
     style: { width: 240, height: 130 },
     data: {
-      title: 'Spatial memory canvas',
-      body: 'Pull any message onto an infinite canvas. Cluster, connect, revisit — instead of scrolling forever.',
+      titleKey: 'sample.node.spatial.title',
+      bodyKey: 'sample.node.spatial.body',
     },
   },
   {
@@ -42,8 +47,8 @@ export const initialNodes: DemoNode[] = [
     position: { x: 560, y: 220 },
     style: { width: 240, height: 130 },
     data: {
-      title: 'Mac-native via Tauri',
-      body: 'A real desktop app. ~10 MB binary. Native windowing, menubar, shortcuts.',
+      titleKey: 'sample.node.mac.title',
+      bodyKey: 'sample.node.mac.body',
     },
   },
   {
@@ -52,8 +57,8 @@ export const initialNodes: DemoNode[] = [
     position: { x: 560, y: 410 },
     style: { width: 240, height: 130 },
     data: {
-      title: 'Why not Notion?',
-      body: 'Notion is for documents. Hypratia is for thinking — the canvas is the medium, not the output.',
+      titleKey: 'sample.node.notion.title',
+      bodyKey: 'sample.node.notion.body',
     },
   },
   {
@@ -62,11 +67,10 @@ export const initialNodes: DemoNode[] = [
     position: { x: -40, y: 410 },
     style: { width: 240, height: 130 },
     data: {
-      title: 'Obsidian-compatible',
-      body: 'Export to your vault as Markdown with wikilinks. Round-trip safe. Your notes outlive the app.',
+      titleKey: 'sample.node.obsidian.title',
+      bodyKey: 'sample.node.obsidian.body',
     },
   },
-  // ---------- File nodes — demonstrate that PDF / PPTX / MD all become spatial ----------
   {
     id: 'pdf-research',
     type: 'file',
@@ -75,9 +79,8 @@ export const initialNodes: DemoNode[] = [
     data: {
       type: 'pdf',
       filename: 'research-paper.pdf',
-      preview:
-        'Spatial memory in human cognition: a review of recent neuroimaging evidence supporting the place-cell hypothesis…',
-      meta: '24 pages · 3 citations linked',
+      previewKey: 'sample.file.pdf.preview',
+      metaKey: 'sample.file.pdf.meta',
     },
   },
   {
@@ -88,8 +91,8 @@ export const initialNodes: DemoNode[] = [
     data: {
       type: 'pptx',
       filename: 'q1-roadmap.pptx',
-      preview: 'Q1 roadmap · objectives · milestones · risks',
-      meta: '12 slides',
+      previewKey: 'sample.file.pptx.preview',
+      metaKey: 'sample.file.pptx.meta',
     },
   },
   {
@@ -100,9 +103,8 @@ export const initialNodes: DemoNode[] = [
     data: {
       type: 'md',
       filename: 'reading-list.md',
-      preview:
-        'Books on memory and cognition: Sapiens, Thinking Fast & Slow, A Mind for Numbers…',
-      meta: '12 items',
+      previewKey: 'sample.file.md.preview',
+      metaKey: 'sample.file.md.meta',
     },
   },
 ];

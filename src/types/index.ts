@@ -296,6 +296,11 @@ export type Settings = {
   nightModeTheme?: Theme;
   nightModeStart?: string;
   nightModeEnd?: string;
+  /**
+   * UI language. Two-letter ISO code (one of `SUPPORTED_LANGUAGES` from
+   * `src/i18n`). Unset = follow OS locale on first launch.
+   */
+  language?: string;
 };
 
 export const CANVAS_FONT_SIZE_DEFAULT = 13;

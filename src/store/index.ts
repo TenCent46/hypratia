@@ -174,6 +174,7 @@ type State = {
   setNightModeAuto: (auto: boolean) => void;
   setNightModeTheme: (theme: Theme) => void;
   setNightModeWindow: (patch: { start?: string; end?: string }) => void;
+  setLanguage: (lng: string) => void;
 
   createConversation: (title?: string, projectId?: ID) => ID;
   ensureConversation: () => ID;
@@ -551,6 +552,9 @@ export const useStore = create<State>()(
           ...(end !== undefined ? { nightModeEnd: end } : {}),
         },
       })),
+
+    setLanguage: (lng) =>
+      set((s) => ({ settings: { ...s.settings, language: lng } })),
 
     createConversation: (title = 'Untitled', projectId) => {
       const id = newId();

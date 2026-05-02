@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store';
 import { dialog } from '../../services/dialog';
 
@@ -11,6 +12,7 @@ export function Onboarding() {
 }
 
 function OnboardingInner() {
+  const { t } = useTranslation();
   const [step, setStep] = useState(0);
   const dismiss = useStore((s) => s.dismissOnboarding);
   const setSettingsOpen = useStore((s) => s.setSettingsOpen);
@@ -22,12 +24,8 @@ function OnboardingInner() {
 
   function finish() {
     if (!useStore.getState().conversations.length) {
-      const id = createConversation('First conversation');
-      addMessage(
-        id,
-        'system',
-        '_Welcome. Try ⌘P for the command palette, ⌘K to search, ⌘J on selected text for AI._',
-      );
+      const id = createConversation(t('onboarding.firstConversation'));
+      addMessage(id, 'system', t('onboarding.welcomeMessage'));
       setActiveConversation(id);
     }
     dismiss();
@@ -42,37 +40,36 @@ function OnboardingInner() {
     <div className="modal-backdrop" onClick={() => undefined}>
       <div className="modal onboarding" onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>Welcome to Hypratia</h2>
-          <button type="button" className="close" onClick={finish} title="Skip">
+          <h2>{t('onboarding.welcome')}</h2>
+          <button
+            type="button"
+            className="close"
+            onClick={finish}
+            title={t('onboarding.skip')}
+          >
             ×
           </button>
         </header>
 
         {step === 0 ? (
           <section>
-            <p>
-              On the right is a real chat. On the left is your spatial memory:
-              drag thoughts onto the canvas, drop PDFs and images, highlight
-              text inside a PDF to spawn a linked card.
-            </p>
-            <p className="muted">
-              Everything stays on your machine. You bring your own AI keys.
-            </p>
+            <p>{t('onboarding.intro')}</p>
+            <p className="muted">{t('onboarding.introNote')}</p>
             <ul className="onboarding-shortcuts">
               <li>
-                <kbd>⌘P</kbd> command palette
+                <kbd>⌘P</kbd> {t('onboarding.shortcutCommandPalette')}
               </li>
               <li>
-                <kbd>⌘K</kbd> search
+                <kbd>⌘K</kbd> {t('onboarding.shortcutSearch')}
               </li>
               <li>
-                <kbd>⌘J</kbd> AI palette on selection
+                <kbd>⌘J</kbd> {t('onboarding.shortcutAiPalette')}
               </li>
               <li>
-                <kbd>⌘D</kbd> today's daily note
+                <kbd>⌘D</kbd> {t('onboarding.shortcutDaily')}
               </li>
               <li>
-                <kbd>⌘?</kbd> all shortcuts
+                <kbd>⌘?</kbd> {t('onboarding.shortcutAll')}
               </li>
             </ul>
           </section>
@@ -80,32 +77,28 @@ function OnboardingInner() {
 
         {step === 1 ? (
           <section>
-            <h3>Add an AI provider</h3>
-            <p className="muted">
-              Optional — the app works as a journal without one. To enable
-              streaming chat, add a key now or later.
-            </p>
+            <h3>{t('onboarding.addProvider')}</h3>
+            <p className="muted">{t('onboarding.addProviderHelp')}</p>
             <button
               type="button"
               className="primary"
               onClick={() => setSettingsOpen(true)}
             >
-              Open Settings → Providers
+              {t('onboarding.openProviderSettings')}
             </button>
           </section>
         ) : null}
 
         {step === 2 ? (
           <section>
-            <h3>Pick your vault (optional)</h3>
-            <p className="muted">
-              When you export, conversations + nodes go into this folder as
-              Markdown. Skip and your data stays only in app data.
-            </p>
+            <h3>{t('onboarding.pickVault')}</h3>
+            <p className="muted">{t('onboarding.pickVaultHelp')}</p>
             <div className="path-row">
-              <code>{obsidianVaultPath ?? '(not set)'}</code>
+              <code>{obsidianVaultPath ?? t('onboarding.notSet')}</code>
               <button type="button" onClick={pickVault}>
-                {obsidianVaultPath ? 'Change…' : 'Choose folder…'}
+                {obsidianVaultPath
+                  ? t('onboarding.change')
+                  : t('onboarding.choose')}
               </button>
             </div>
           </section>
@@ -113,13 +106,13 @@ function OnboardingInner() {
 
         <footer className="onboarding-footer">
           <button type="button" className="link" onClick={finish}>
-            Skip
+            {t('onboarding.skip')}
           </button>
           <span className="muted">{step + 1} / 3</span>
           <div className="onboarding-nav">
             {step > 0 ? (
               <button type="button" onClick={() => setStep(step - 1)}>
-                Back
+                {t('onboarding.back')}
               </button>
             ) : null}
             {step < 2 ? (
@@ -128,11 +121,11 @@ function OnboardingInner() {
                 className="primary"
                 onClick={() => setStep(step + 1)}
               >
-                Next
+                {t('onboarding.next')}
               </button>
             ) : (
               <button type="button" className="primary" onClick={finish}>
-                Get started
+                {t('onboarding.getStarted')}
               </button>
             )}
           </div>

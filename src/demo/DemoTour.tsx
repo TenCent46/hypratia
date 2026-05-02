@@ -1,31 +1,26 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
+import { useLocale } from '../web/LocaleProvider';
 
 type TourStep = {
-  title: string;
-  body: string;
+  titleKey: string;
+  bodyKey: string;
   /** CSS selector to spotlight. Tour card stays centered. */
   target?: string;
 };
 
 const STEPS: TourStep[] = [
+  { titleKey: 'tour.welcome.title', bodyKey: 'tour.welcome.body' },
   {
-    title: 'Welcome to Hypratia',
-    body: 'A memory canvas for your conversations. This is a live demo — no AI calls happen and nothing leaves your browser.',
-  },
-  {
-    title: 'Add a memo',
-    body: 'Click + Add memo to drop a new Markdown node on the canvas. Drag it anywhere.',
+    titleKey: 'tour.add.title',
+    bodyKey: 'tour.add.body',
     target: '[data-tour="add-memo"]',
   },
   {
-    title: 'Paste anything',
-    body: 'Copy any image (e.g. ⌘⇧4 on Mac), then press ⌘V on the canvas. Pasted text becomes a memo, pasted images become image nodes.',
+    titleKey: 'tour.paste.title',
+    bodyKey: 'tour.paste.body',
     target: '[data-tour="canvas"]',
   },
-  {
-    title: 'PDF, PPTX, MD — all supported',
-    body: 'In the full Mac app, drop PDFs, PowerPoint decks, or Markdown files onto the canvas. Hypratia parses them, indexes content, and links them to your conversations.',
-  },
+  { titleKey: 'tour.files.title', bodyKey: 'tour.files.body' },
 ];
 
 const STORAGE_KEY = 'hypratia-demo-tour-seen';
@@ -80,6 +75,7 @@ type OverlayProps = {
 };
 
 function TourOverlay({ step, total, current, onSkip, onNext }: OverlayProps) {
+  const { t, tf } = useLocale();
   const [rect, setRect] = useState<DOMRect | null>(null);
 
   useLayoutEffect(() => {
@@ -111,7 +107,7 @@ function TourOverlay({ step, total, current, onSkip, onNext }: OverlayProps) {
         type="button"
         className="demo-tour-backdrop"
         onClick={onSkip}
-        aria-label="Skip tour"
+        aria-label={t('tour.skip')}
       />
       {rect ? (
         <div
@@ -137,10 +133,10 @@ function TourOverlay({ step, total, current, onSkip, onNext }: OverlayProps) {
           ))}
         </div>
         <span className="demo-tour-meta">
-          Step {step + 1} of {total}
+          {tf('tour.step', { n: step + 1, total })}
         </span>
-        <h3 className="demo-tour-title">{current.title}</h3>
-        <p className="demo-tour-body">{current.body}</p>
+        <h3 className="demo-tour-title">{t(current.titleKey)}</h3>
+        <p className="demo-tour-body">{t(current.bodyKey)}</p>
         <div className="demo-tour-actions">
           {!isLast ? (
             <button
@@ -148,7 +144,7 @@ function TourOverlay({ step, total, current, onSkip, onNext }: OverlayProps) {
               className="demo-tour-skip"
               onClick={onSkip}
             >
-              Skip tour
+              {t('tour.skip')}
             </button>
           ) : (
             <span />
@@ -159,7 +155,7 @@ function TourOverlay({ step, total, current, onSkip, onNext }: OverlayProps) {
             onClick={onNext}
             autoFocus
           >
-            {isLast ? 'Got it' : 'Next →'}
+            {isLast ? t('tour.gotIt') : t('tour.next')}
           </button>
         </div>
       </div>

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../../i18n';
 import { useStore } from '../../store';
 import { storage } from '../../services/storage';
 import { dialog } from '../../services/dialog';
@@ -46,6 +48,7 @@ export function SettingsModal({ onDetach }: { onDetach?: () => void }) {
 }
 
 export function SettingsPanel() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>('providers');
   return (
     <div className="settings-body">
@@ -54,37 +57,37 @@ export function SettingsPanel() {
           className={tab === 'providers' ? 'active' : ''}
           onClick={() => setTab('providers')}
         >
-          Providers & keys
+          {t('settings.tabs.providers')}
         </button>
         <button
           className={tab === 'usage' ? 'active' : ''}
           onClick={() => setTab('usage')}
         >
-          Usage & cost
+          {t('settings.tabs.usage')}
         </button>
         <button
           className={tab === 'appearance' ? 'active' : ''}
           onClick={() => setTab('appearance')}
         >
-          Appearance
+          {t('settings.tabs.appearance')}
         </button>
         <button
           className={tab === 'vault' ? 'active' : ''}
           onClick={() => setTab('vault')}
         >
-          Vault & data
+          {t('settings.tabs.vault')}
         </button>
         <button
           className={tab === 'workflow' ? 'active' : ''}
           onClick={() => setTab('workflow')}
         >
-          Daily & templates
+          {t('settings.tabs.workflow')}
         </button>
         <button
           className={tab === 'about' ? 'active' : ''}
           onClick={() => setTab('about')}
         >
-          About
+          {t('settings.tabs.about')}
         </button>
       </nav>
       <div className="settings-content">
@@ -106,11 +109,12 @@ function SettingsModalInner({
   onClose: () => void;
   onDetach?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>Settings</h2>
+          <h2>{t('settings.title')}</h2>
           {onDetach ? (
             <button
               type="button"
@@ -840,15 +844,16 @@ function ArtifactUsageSection() {
 }
 
 function AppearanceTab() {
+  const { t } = useTranslation();
   const theme = useStore((s) => s.settings.theme);
   const workspaceName = useStore((s) => s.settings.workspaceName ?? '');
   const setTheme = useStore((s) => s.setTheme);
   const setWorkspaceName = useStore((s) => s.setWorkspaceName);
   return (
     <section className="settings-section">
-      <h3>Workspace</h3>
+      <h3>{t('settings.appearance.workspace')}</h3>
       <label className="settings-row">
-        <span>Workspace name</span>
+        <span>{t('settings.appearance.workspaceName')}</span>
         <input
           type="text"
           value={workspaceName}
@@ -860,7 +865,9 @@ function AppearanceTab() {
         />
       </label>
 
-      <h3>Theme</h3>
+      <LanguageRow />
+
+      <h3>{t('settings.appearance.theme')}</h3>
       <div className="theme-grid">
         {THEMES.map((t) => (
           <button
@@ -875,7 +882,7 @@ function AppearanceTab() {
         ))}
       </div>
       <p className="muted" style={{ marginTop: 12 }}>
-        Theme applies instantly. Custom accent and brand themes are coming in v1.0.1.
+        {t('settings.appearance.themeNote')}
       </p>
 
       <NightModeSection />
@@ -883,7 +890,39 @@ function AppearanceTab() {
   );
 }
 
+function LanguageRow() {
+  const { t, i18n } = useTranslation();
+  const stored = useStore((s) => s.settings.language);
+  const setStoredLanguage = useStore((s) => s.setLanguage);
+  const value =
+    (stored as SupportedLanguage | undefined) ??
+    (i18n.resolvedLanguage as SupportedLanguage | undefined) ??
+    'en';
+  return (
+    <div className="settings-row">
+      <label htmlFor="language-select">{t('language.label')}</label>
+      <div>
+        <select
+          id="language-select"
+          value={value}
+          onChange={(e) => setStoredLanguage(e.target.value)}
+        >
+          {SUPPORTED_LANGUAGES.map((lng) => (
+            <option key={lng} value={lng}>
+              {t(`language.${lng}`)}
+            </option>
+          ))}
+        </select>
+        <p className="muted small" style={{ marginTop: 4 }}>
+          {t('language.note')}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function NightModeSection() {
+  const { t } = useTranslation();
   const auto = useStore((s) => s.settings.nightModeAuto ?? false);
   const nightTheme = useStore(
     (s) => s.settings.nightModeTheme ?? NIGHT_MODE_DEFAULT_THEME,
@@ -899,23 +938,24 @@ function NightModeSection() {
   const setNightModeWindow = useStore((s) => s.setNightModeWindow);
   return (
     <>
-      <h3 style={{ marginTop: 24 }}>Auto night theme</h3>
+      <h3 style={{ marginTop: 24 }}>{t('settings.appearance.autoNightTheme')}</h3>
       <label>
         <input
           type="checkbox"
           checked={auto}
           onChange={(e) => setNightModeAuto(e.target.checked)}
         />{' '}
-        Switch to a dark theme at night
+        {t('settings.appearance.switchAtNight')}
       </label>
       <p className="muted small">
-        Your selected theme above stays as the day theme; only the displayed
-        appearance is overridden during the night window.
+        {t('settings.appearance.nightModeNote')}
       </p>
       {auto ? (
         <>
           <div className="settings-row">
-            <label htmlFor="night-theme-select">Night theme</label>
+            <label htmlFor="night-theme-select">
+              {t('settings.appearance.nightTheme')}
+            </label>
             <select
               id="night-theme-select"
               value={nightTheme}
@@ -923,12 +963,16 @@ function NightModeSection() {
                 setNightModeTheme(e.target.value as Theme)
               }
             >
-              <option value="dark">Dark</option>
-              <option value="high-contrast">High contrast</option>
+              <option value="dark">{t('settings.appearance.themeDark')}</option>
+              <option value="high-contrast">
+                {t('settings.appearance.themeHighContrast')}
+              </option>
             </select>
           </div>
           <div className="settings-row">
-            <label htmlFor="night-start">Starts at</label>
+            <label htmlFor="night-start">
+              {t('settings.appearance.startsAt')}
+            </label>
             <input
               id="night-start"
               type="time"
@@ -939,7 +983,9 @@ function NightModeSection() {
             />
           </div>
           <div className="settings-row">
-            <label htmlFor="night-end">Ends at</label>
+            <label htmlFor="night-end">
+              {t('settings.appearance.endsAt')}
+            </label>
             <input
               id="night-end"
               type="time"
@@ -1007,6 +1053,7 @@ function MarkdownEditorSettingsSection() {
 }
 
 function ConversationMapSection() {
+  const { t } = useTranslation();
   const wheelMode = useStore((s) => s.settings.canvasWheelMode ?? 'pan');
   const setCanvasWheelMode = useStore((s) => s.setCanvasWheelMode);
   const classifier = useStore(
@@ -1015,14 +1062,12 @@ function ConversationMapSection() {
   const setThemesClassifier = useStore((s) => s.setThemesClassifier);
   return (
     <section>
-      <h3>Conversation map</h3>
-      <p className="muted">
-        The canvas is a compact map of your chat history. Each ask becomes a
-        node; clicking a node jumps the chat to the source message. See spec
-        32.
-      </p>
+      <h3>{t('settings.canvasMap.title')}</h3>
+      <p className="muted">{t('settings.canvasMap.description')}</p>
       <div className="settings-row">
-        <label htmlFor="canvas-wheel-mode">Wheel behavior</label>
+        <label htmlFor="canvas-wheel-mode">
+          {t('settings.canvasMap.wheelLabel')}
+        </label>
         <select
           id="canvas-wheel-mode"
           value={wheelMode}
@@ -1030,15 +1075,15 @@ function ConversationMapSection() {
             setCanvasWheelMode(e.target.value as 'pan' | 'zoom')
           }
         >
-          <option value="pan">Scroll / pan (Cmd-wheel zooms)</option>
-          <option value="zoom">Zoom (wheel zooms)</option>
+          <option value="pan">{t('settings.canvasMap.wheelPan')}</option>
+          <option value="zoom">{t('settings.canvasMap.wheelZoom')}</option>
         </select>
       </div>
-      <p className="muted small">
-        Toggle live with the <kbd>S</kbd> key. Pinch always zooms.
-      </p>
+      <p className="muted small">{t('settings.canvasMap.wheelHint')}</p>
       <div className="settings-row">
-        <label htmlFor="themes-classifier">Theme classifier</label>
+        <label htmlFor="themes-classifier">
+          {t('settings.canvasMap.themesClassifierLabel')}
+        </label>
         <select
           id="themes-classifier"
           value={classifier}
@@ -1049,10 +1094,14 @@ function ConversationMapSection() {
           }
         >
           <option value="auto">
-            Auto (LLM when a key is set, heuristic otherwise)
+            {t('settings.canvasMap.themesClassifierAuto')}
           </option>
-          <option value="heuristic">Heuristic only (offline)</option>
-          <option value="llm">LLM only</option>
+          <option value="heuristic">
+            {t('settings.canvasMap.themesClassifierHeuristic')}
+          </option>
+          <option value="llm">
+            {t('settings.canvasMap.themesClassifierLlm')}
+          </option>
         </select>
       </div>
       <CanvasFontSizeRow />
@@ -1061,6 +1110,7 @@ function ConversationMapSection() {
 }
 
 function CanvasFontSizeRow() {
+  const { t } = useTranslation();
   const stored = useStore((s) => s.settings.canvasFontSize);
   const setCanvasFontSize = useStore((s) => s.setCanvasFontSize);
   const value = stored ?? CANVAS_FONT_SIZE_DEFAULT;
@@ -1079,7 +1129,9 @@ function CanvasFontSizeRow() {
   }
   return (
     <div className="settings-row settings-row-canvas-font">
-      <label htmlFor="canvas-font-size-input">Canvas text size</label>
+      <label htmlFor="canvas-font-size-input">
+        {t('settings.canvasMap.canvasFontSize')}
+      </label>
       <div className="canvas-font-controls">
         <input
           id="canvas-font-size-slider"
@@ -1120,7 +1172,7 @@ function CanvasFontSizeRow() {
           disabled={value === CANVAS_FONT_SIZE_DEFAULT}
           title={`Reset to ${CANVAS_FONT_SIZE_DEFAULT}px`}
         >
-          Reset
+          {t('settings.canvasMap.canvasFontReset')}
         </button>
       </div>
     </div>

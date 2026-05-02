@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type RefObject } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store';
 import { confirmDangerTwice } from '../../lib/confirm';
 import type { Conversation, ID, Project } from '../../types';
@@ -77,6 +78,7 @@ export function Sidebar({
   const removeProject = useStore((s) => s.removeProject);
   const toggleProjectExpanded = useStore((s) => s.toggleProjectExpanded);
   const setSearchOpen = useStore((s) => s.setSearchOpen);
+  const { t } = useTranslation();
 
   const [renamingChatId, setRenamingChatId] = useState<ID | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<ID | null>(null);
@@ -191,8 +193,8 @@ export function Sidebar({
           type="button"
           className="sidebar-icon-btn"
           onClick={() => onNewChat()}
-          aria-label="New chat"
-          title="New chat"
+          aria-label={t('sidebar.addChat')}
+          title={t('sidebar.addChat')}
         >
           ✎
         </button>
@@ -252,7 +254,7 @@ export function Sidebar({
           onClick={() => onNewChat()}
         >
           <span className="sidebar-row-icon">✎</span>
-          <span className="sidebar-row-label">New chat</span>
+          <span className="sidebar-row-label">{t('sidebar.addChat')}</span>
         </button>
         <button
           type="button"
@@ -272,7 +274,7 @@ export function Sidebar({
           className={`sidebar-tab${sidebarTab === 'projects' ? ' active' : ''}`}
           onClick={() => setSidebarTab('projects')}
         >
-          Projects
+          {t('sidebar.projects')}
         </button>
         <button
           type="button"
@@ -295,13 +297,13 @@ export function Sidebar({
       ) : (
         <div className="sidebar-section sidebar-section-fill">
         <div className="sidebar-section-header">
-          <span>Projects</span>
+          <span>{t('sidebar.projects')}</span>
           <button
             type="button"
             className="sidebar-section-add"
             onClick={onNewProject}
-            aria-label="New project"
-            title="New project"
+            aria-label={t('sidebar.addProject')}
+            title={t('sidebar.addProject')}
           >
             +
           </button>
@@ -548,6 +550,8 @@ function DefaultProjectRow({
     onChatDrop(conversationId);
   }
 
+  const { t } = useTranslation();
+
   return (
     <div
       className={`sidebar-project sidebar-project-default${expanded ? ' expanded' : ''}${
@@ -568,7 +572,7 @@ function DefaultProjectRow({
           <span className="sidebar-project-icon">
             <ChatBubbleIcon />
           </span>
-          <span className="sidebar-project-name">Chats</span>
+          <span className="sidebar-project-name">{t('sidebar.chats')}</span>
         </button>
         <div className="sidebar-project-actions">
           <button
@@ -588,7 +592,7 @@ function DefaultProjectRow({
       {expanded ? (
         <div className="sidebar-project-children">
           {conversations.length === 0 ? (
-            <div className="sidebar-empty small">No chats yet.</div>
+            <div className="sidebar-empty small">{t('sidebar.noChats')}</div>
           ) : (
             conversations.map((c) => (
               <ChatRow
@@ -857,6 +861,7 @@ function ChatRow({
   inProject?: boolean;
   onDragStart: (e: DragEvent<HTMLDivElement>) => void;
 }) {
+  const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
 
@@ -972,7 +977,9 @@ function ChatRow({
                   </button>
                 ))}
               {projects.length === 0 ? (
-                <div className="sidebar-empty small">No projects yet.</div>
+                <div className="sidebar-empty small">
+                  {t('sidebar.noProjects')}
+                </div>
               ) : null}
             </div>
           ) : null}

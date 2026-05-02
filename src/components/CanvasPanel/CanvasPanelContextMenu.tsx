@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { CanvasTool } from '../../store';
 import {
   AppContextMenuItem as Item,
@@ -55,6 +56,7 @@ export function CanvasPanelContextMenu({
   onSetTool,
   onClose,
 }: CanvasPanelContextMenuProps) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   const pos = useClampedMenuPosition(ref, x, y);
 
@@ -81,7 +83,9 @@ export function CanvasPanelContextMenu({
     };
   }, [onClose]);
 
-  const fitLabel = hasSelection ? 'Fit Selection' : 'Fit All';
+  const fitLabel = hasSelection
+    ? t('canvas.fitSelection')
+    : t('canvas.fitAll');
 
   return (
     <div
@@ -96,7 +100,7 @@ export function CanvasPanelContextMenu({
           onAddNode();
           onClose();
         }}
-        label="Add Node"
+        label={t('canvas.addNode')}
         disabled={!canAddNode}
       />
       <Item
@@ -104,7 +108,7 @@ export function CanvasPanelContextMenu({
           onPaste();
           onClose();
         }}
-        label="Paste"
+        label={t('canvas.paste')}
         shortcut="⌘V"
         disabled={!canAddNode}
       />
@@ -121,7 +125,7 @@ export function CanvasPanelContextMenu({
               onShowCanvas?.();
               onClose();
             }}
-            label="Show Canvas"
+            label={t('canvas.showCanvas')}
             checked={canvasPanelState === 'shown'}
           />
           <Item
@@ -129,7 +133,7 @@ export function CanvasPanelContextMenu({
               onHideCanvas?.();
               onClose();
             }}
-            label="Hide Canvas"
+            label={t('canvas.hideCanvas')}
             checked={canvasPanelState === 'hidden'}
           />
           <Separator />
@@ -138,7 +142,7 @@ export function CanvasPanelContextMenu({
               onShowChat?.();
               onClose();
             }}
-            label="Show Chat"
+            label={t('canvas.showChat')}
             checked={chatPanelState === 'shown'}
           />
           <Item
@@ -146,7 +150,7 @@ export function CanvasPanelContextMenu({
               onHideChat?.();
               onClose();
             }}
-            label="Hide Chat"
+            label={t('canvas.hideChat')}
             checked={chatPanelState === 'hidden'}
           />
           <Separator />
@@ -157,7 +161,7 @@ export function CanvasPanelContextMenu({
           onResetView();
           onClose();
         }}
-        label="Reset View"
+        label={t('canvas.resetView')}
       />
       <Item
         onClick={() => {
@@ -172,7 +176,7 @@ export function CanvasPanelContextMenu({
           onFitToCanvas();
           onClose();
         }}
-        label="Fit to Canvas"
+        label={t('canvas.fitToCanvas')}
         disabled={!hasNodes}
       />
       <Separator />
@@ -181,7 +185,7 @@ export function CanvasPanelContextMenu({
           onSetTool('select');
           onClose();
         }}
-        label="Select Tool"
+        label={t('canvas.selectTool')}
         shortcut="V"
         checked={canvasTool === 'select'}
       />
@@ -190,12 +194,12 @@ export function CanvasPanelContextMenu({
           onSetTool('hand');
           onClose();
         }}
-        label="Hand Tool"
+        label={t('canvas.handTool')}
         shortcut="H"
         checked={canvasTool === 'hand'}
       />
       <Separator />
-      <Item onClick={onClose} label="Cancel" shortcut="Esc" />
+      <Item onClick={onClose} label={t('canvas.cancel')} shortcut="Esc" />
     </div>
   );
 }

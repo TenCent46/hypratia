@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store';
 import { dialog } from '../../services/dialog';
 import { attachments as attachmentsService } from '../../services/attachments';
@@ -18,6 +19,7 @@ export function NodeContextMenu({
   state: NodeContextMenuState;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const node = useStore((s) => s.nodes.find((n) => n.id === state.nodeId));
   const attachmentsList = useStore((s) => s.attachments);
   const projects = useStore((s) => s.projects);
@@ -152,31 +154,31 @@ export function NodeContextMenu({
       onContextMenu={(e) => e.preventDefault()}
     >
       <button type="button" onClick={openEditor}>
-        Open in editor
+        {t('node.openInEditor')}
       </button>
       <button type="button" onClick={copyRich}>
-        Copy
+        {t('node.copy')}
       </button>
       <button type="button" onClick={copyAsMarkdown}>
-        Copy as Markdown
+        {t('node.copyAsMarkdown')}
       </button>
       {attachment ? (
         <>
           <button type="button" onClick={openExternal}>
-            Open with default app
+            {t('node.openExternal')}
           </button>
           <button type="button" onClick={showInFinder}>
-            Show in Finder
+            {t('node.showInFinder')}
           </button>
         </>
       ) : null}
       {projects.length > 0 && conv ? (
         <details className="node-context-submenu">
-          <summary>Move conversation to…</summary>
+          <summary>{t('node.moveTo')}</summary>
           <div className="node-context-submenu-body">
             {conv.projectId ? (
               <button type="button" onClick={() => moveTo(null)}>
-                (No project)
+                {t('node.noProject')}
               </button>
             ) : null}
             {projects
@@ -192,7 +194,7 @@ export function NodeContextMenu({
       ) : null}
       <hr />
       <button type="button" className="danger" onClick={deleteNode}>
-        Delete card
+        {t('node.deleteCard')}
       </button>
     </div>
   );

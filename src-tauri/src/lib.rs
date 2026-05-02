@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use tauri::menu::{
@@ -401,6 +402,50 @@ fn delete_path(root_path: String, path: String) -> Result<(), String> {
         fs::remove_dir_all(target).map_err(|e| e.to_string())
     } else {
         fs::remove_file(target).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn read_clipboard_text() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("pbpaste")
+            .output()
+            .map_err(|e| format!("pbpaste failed: {e}"))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Get-Clipboard -Raw"])
+            .output()
+            .map_err(|e| format!("Get-Clipboard failed: {e}"))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        for program in ["wl-paste", "xclip"] {
+            let mut cmd = Command::new(program);
+            if program == "wl-paste" {
+                cmd.args(["--no-newline"]);
+            } else {
+                cmd.args(["-selection", "clipboard", "-out"]);
+            }
+            if let Ok(output) = cmd.output() {
+                if output.status.success() {
+                    return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+                }
+            }
+        }
+        Err("no supported clipboard reader found".to_string())
     }
 }
 
@@ -890,6 +935,7 @@ pub fn run() {
             create_folder,
             rename_path,
             delete_path,
+            read_clipboard_text,
             fts_index_replace,
             fts_index_search,
             fts_index_clear,

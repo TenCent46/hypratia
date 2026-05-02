@@ -1,4 +1,5 @@
 import { useStore } from '../../store';
+import { invoke } from '@tauri-apps/api/core';
 import { attachments } from '../../services/attachments';
 import type { Attachment, ID } from '../../types';
 import { htmlToMarkdown } from '../../services/markdown/htmlToMarkdown';
@@ -195,6 +196,15 @@ function payloadFromEvent(data: DataTransfer): ClipboardPayload {
  */
 async function payloadFromAsyncClipboard(): Promise<ClipboardPayload> {
   const out: ClipboardPayload = { files: [], html: '', text: '' };
+  try {
+    const text = await invoke<string>('read_clipboard_text');
+    if (text.trim()) {
+      out.text = text;
+      return out;
+    }
+  } catch {
+    // Browser/demo builds and non-desktop environments fall back below.
+  }
   if (!navigator.clipboard) return out;
   try {
     const items = await navigator.clipboard.read();

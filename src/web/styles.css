@@ -94,6 +94,43 @@ body {
   align-items: center;
   gap: 10px;
 }
+
+/* Language segmented control — sits in the header next to GitHub + Download. */
+.demo-lang-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--demo-page-bg-soft);
+  border: 1px solid var(--demo-page-line);
+}
+.demo-lang-switch-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--demo-page-text-mute);
+  transition: color 120ms ease, background 120ms ease;
+  font-variant: small-caps;
+}
+.demo-lang-switch-btn:hover {
+  color: var(--demo-page-text);
+}
+.demo-lang-switch-btn.active {
+  background: var(--brand-navy);
+  color: #fff;
+}
+@media (max-width: 540px) {
+  .demo-lang-switch {
+    display: none;
+  }
+}
 .demo-header-icon-btn {
   display: inline-grid;
   place-items: center;

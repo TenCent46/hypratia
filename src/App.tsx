@@ -32,6 +32,8 @@ import { PdfViewer } from './features/pdf/PdfViewer';
 import { Onboarding } from './components/Onboarding/Onboarding';
 import { hydrateAndWire } from './store/persistence';
 import { useStore } from './store';
+import { setLanguage as setI18nLanguage } from './i18n';
+import type { SupportedLanguage } from './i18n';
 import {
   CANVAS_FONT_SIZE_DEFAULT,
   NIGHT_MODE_DEFAULT_END,
@@ -121,6 +123,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const theme = useStore((s) => s.settings.theme);
   const canvasFontSize = useStore((s) => s.settings.canvasFontSize);
+  const language = useStore((s) => s.settings.language);
   const nightModeAuto = useStore((s) => s.settings.nightModeAuto ?? false);
   const nightModeTheme = useStore(
     (s) => s.settings.nightModeTheme ?? NIGHT_MODE_DEFAULT_THEME,
@@ -184,6 +187,10 @@ function App() {
     const id = setInterval(apply, 60_000);
     return () => clearInterval(id);
   }, [theme, nightModeAuto, nightModeTheme, nightModeStart, nightModeEnd]);
+
+  useEffect(() => {
+    if (language) setI18nLanguage(language as SupportedLanguage);
+  }, [language]);
 
   useEffect(() => {
     const px = canvasFontSize ?? CANVAS_FONT_SIZE_DEFAULT;

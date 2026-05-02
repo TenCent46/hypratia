@@ -6,12 +6,20 @@ import ReactDOM from 'react-dom/client';
 import '../App.css';
 import '../web/styles.css';
 import { LandingApp } from './LandingApp';
+import { LocaleProvider } from '../web/LocaleProvider';
+import { detectLocale, persistLocale } from '../web/i18n';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('landing root element missing');
 
+// Detect locale before render to avoid an English flash on JA/ZH browsers.
+const initialLocale = detectLocale();
+persistLocale(initialLocale);
+
 ReactDOM.createRoot(root as HTMLElement).render(
   <React.StrictMode>
-    <LandingApp />
+    <LocaleProvider initialLocale={initialLocale}>
+      <LandingApp />
+    </LocaleProvider>
   </React.StrictMode>,
 );

@@ -1,7 +1,9 @@
+import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store';
 import { useCommands } from '../../services/commands/useCommands';
 
 export function ShortcutsModal() {
+  const { t } = useTranslation();
   const open = useStore((s) => s.ui.shortcutsOpen);
   const setOpen = useStore((s) => s.setShortcutsOpen);
   const commands = useCommands();
@@ -19,7 +21,7 @@ export function ShortcutsModal() {
     <div className="modal-backdrop" onClick={() => setOpen(false)}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>Keyboard shortcuts</h2>
+          <h2>{t('shortcuts.title')}</h2>
           <button type="button" className="close" onClick={() => setOpen(false)}>
             ×
           </button>

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Command } from 'cmdk';
+import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store';
 import { useCommands } from '../../services/commands/useCommands';
 
 export function CommandPalette() {
+  const { t } = useTranslation();
   const open = useStore((s) => s.ui.commandOpen);
   const setOpen = useStore((s) => s.setCommandOpen);
   const commands = useCommands();
@@ -129,11 +131,13 @@ export function CommandPalette() {
         <Command label="Command palette" loop>
           <Command.Input
             autoFocus
-            placeholder="Type a command…"
+            placeholder={t('commandPalette.placeholder')}
             className="cmd-input"
           />
           <Command.List ref={listRef} className="cmd-list">
-            <Command.Empty className="search-empty">No commands.</Command.Empty>
+            <Command.Empty className="search-empty">
+              {t('commandPalette.noCommands')}
+            </Command.Empty>
             {Object.entries(groups).map(([section, cmds]) => (
               <Command.Group
                 key={section}

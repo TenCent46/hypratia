@@ -3,8 +3,10 @@ import { DemoChat } from './DemoChat';
 import { DemoTour } from './DemoTour';
 import { SiteHeader, DOWNLOAD_URL } from '../web/SiteHeader';
 import { SiteFooter } from '../web/SiteFooter';
+import { useLocale } from '../web/LocaleProvider';
 
 export function DemoApp() {
+  const { t } = useLocale();
   return (
     <div className="demo-shell">
       <SiteHeader />
@@ -12,26 +14,21 @@ export function DemoApp() {
       <div className="demo-page-intro">
         <div>
           <h1 className="demo-page-title">
-            Live demo
+            {t('demo.title')}
             <span className="demo-mode-badge demo-mode-badge--inline">
-              Static · no AI calls
+              {t('demo.badge.static')}
             </span>
           </h1>
-          <p className="demo-page-sub">
-            Drag nodes around. Click <strong>+ Add memo</strong> for a new
-            Markdown node, or paste text / images straight onto the canvas.
-            Nothing leaves your browser — this page does not talk to any AI
-            provider.
-          </p>
+          <p className="demo-page-sub">{t('demo.intro')}</p>
         </div>
         <a className="demo-back-link" href="/">
-          ← Back to home
+          {t('demo.back')}
         </a>
       </div>
 
       <section
         className="demo-stage demo-stage-full"
-        aria-label="Hypratia canvas demo"
+        aria-label={t('stage.aria.demo')}
       >
         <div className="demo-stage-canvas">
           <DemoCanvas />
@@ -42,12 +39,9 @@ export function DemoApp() {
       </section>
 
       <div className="demo-page-outro">
-        <p className="demo-page-outro-text">
-          This is a small slice of Hypratia. The Mac app adds local LLM chat,
-          your full Obsidian vault, attachments, search, and more.
-        </p>
+        <p className="demo-page-outro-text">{t('demo.outro')}</p>
         <a className="demo-cta-primary" href={DOWNLOAD_URL}>
-          Download for macOS
+          {t('hero.cta.primary')}
         </a>
       </div>
 

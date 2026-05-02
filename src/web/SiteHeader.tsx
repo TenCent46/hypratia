@@ -1,4 +1,6 @@
 import { HypratiaIcon } from './HypratiaIcon';
+import { LanguageSwitcher } from './LanguageSwitcher';
+import { useLocale } from './LocaleProvider';
 
 /**
  * Sticky brand bar shared by `/` (landing) and `/demo`.
@@ -15,25 +17,27 @@ type SiteHeaderProps = {
 };
 
 export function SiteHeader({ homeHref = '/' }: SiteHeaderProps) {
+  const { t } = useLocale();
   return (
     <header className="demo-header">
-      <a className="demo-brand" href={homeHref} aria-label="Hypratia home">
+      <a className="demo-brand" href={homeHref} aria-label={t('header.aria.home')}>
         <HypratiaIcon size={28} />
         <span className="demo-brand-name">Hypratia</span>
       </a>
       <nav className="demo-header-actions" aria-label="Primary">
+        <LanguageSwitcher />
         <a
           className="demo-header-icon-btn"
           href={REPO_URL}
           target="_blank"
           rel="noreferrer"
-          aria-label="Hypratia on GitHub"
-          title="View source on GitHub"
+          aria-label={t('header.aria.github')}
+          title={t('header.title.github')}
         >
           <GitHubMark />
         </a>
         <a className="demo-download-btn" href={DOWNLOAD_URL}>
-          Download for macOS
+          {t('header.download')}
         </a>
       </nav>
     </header>

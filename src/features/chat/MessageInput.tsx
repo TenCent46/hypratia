@@ -8,6 +8,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store';
 import { attachments } from '../../services/attachments';
 import {
@@ -60,6 +61,7 @@ export function MessageInput({
   onModeChange?: (mode: ChatMode) => void;
   onSlashCommand?: (cmd: SlashCommand, args: string) => void;
 }) {
+  const { t } = useTranslation();
   const [text, setText] = useState('');
   const [pending, setPending] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -338,7 +340,9 @@ export function MessageInput({
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         placeholder={
-          streaming ? 'Streaming… ⌘⌫ to stop' : 'Reply…'
+          streaming
+            ? t('chat.placeholderStreaming')
+            : t('chat.placeholderReply')
         }
         rows={1}
         disabled={streaming}
@@ -351,10 +355,10 @@ export function MessageInput({
             className={`message-input-icon${menuOpen ? ' active' : ''}`}
             onClick={() => setMenuOpen((v) => !v)}
             disabled={streaming}
-            aria-label="Composer actions"
+            aria-label={t('chat.composerActions')}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            title="Add files, skills, search…"
+            title={t('chat.composerActionsTitle')}
           >
             <PlusIcon />
           </button>
@@ -384,8 +388,8 @@ export function MessageInput({
             type="button"
             className="message-input-send-circle stop"
             onClick={onAbort}
-            aria-label="Stop streaming"
-            title="Stop"
+            aria-label={t('chat.stop')}
+            title={t('chat.stop')}
           >
             <StopIcon />
           </button>
@@ -395,8 +399,8 @@ export function MessageInput({
             className="message-input-send-circle"
             onClick={send}
             disabled={!canSend}
-            aria-label="Send message"
-            title="Send"
+            aria-label={t('chat.send')}
+            title={t('chat.send')}
           >
             <ArrowUpIcon />
           </button>

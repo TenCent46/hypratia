@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Background,
   BaseEdge,
@@ -243,6 +244,7 @@ export function CanvasPanel({
   onShowChat,
   onHideChat,
 }: CanvasPanelProps = {}) {
+  const { t } = useTranslation();
   const conversationId = useStore((s) => s.settings.lastConversationId);
   const viewMode = useStore((s) => s.ui.viewMode);
   const storeNodes = useStore((s) => s.nodes);
@@ -1567,10 +1569,10 @@ export function CanvasPanel({
       {empty ? (
         <div className="canvas-empty">
           {showGlobal
-            ? 'Pick a project or conversation in the panel to show its nodes.'
+            ? t('canvas.empty.pickProject')
             : hasMessages
-            ? 'Drag a message here.'
-            : 'Start anywhere.'}
+            ? t('canvas.empty.dragMessage')
+            : t('canvas.empty.startAnywhere')}
         </div>
       ) : null}
       {dupToast ? (
@@ -1836,6 +1838,7 @@ function SelectionContextMenu({
   onClear: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   // Measured clamp — the menu's actual bounding rect is read after
   // mount and the position is shifted (or flipped) so the menu always
@@ -1866,24 +1869,30 @@ function SelectionContextMenu({
       style={{ left: pos.x, top: pos.y }}
     >
       <div className="selection-menu-title">
-        {nodeCount} notes, {edgeCount} links
+        {t('selection.summary', { nodes: nodeCount, edges: edgeCount })}
       </div>
-      <button type="button" onClick={onAsk}>Ask</button>
-      <button type="button" onClick={onSearch}>Search</button>
-      <button type="button" onClick={onOpenMarkdown}>Open Markdown</button>
-      <button type="button" onClick={onCopyLinks}>Copy Markdown Links</button>
+      <button type="button" onClick={onAsk}>{t('selection.ask')}</button>
+      <button type="button" onClick={onSearch}>{t('selection.search')}</button>
+      <button type="button" onClick={onOpenMarkdown}>
+        {t('selection.openMarkdown')}
+      </button>
+      <button type="button" onClick={onCopyLinks}>
+        {t('selection.copyLinks')}
+      </button>
       {nodeCount >= 2 ? (
         <button type="button" onClick={onAddLinks}>
-          Add Link Between Selected Notes
+          {t('selection.addLinks')}
         </button>
       ) : null}
       {edgeCount >= 1 ? (
         <button type="button" className="danger" onClick={onDeleteEdges}>
-          {edgeCount === 1 ? 'Delete Link' : `Delete ${edgeCount} Links`}
+          {edgeCount === 1
+            ? t('selection.deleteLink')
+            : t('selection.deleteLinks', { count: edgeCount })}
         </button>
       ) : null}
       <hr />
-      <div className="selection-menu-title">Panes</div>
+      <div className="selection-menu-title">{t('selection.panes')}</div>
       {/* Panel toggles. The right-click on an edge/node now wins over
           the workspace show/hide menu, but users still want to flip
           panels without dropping the selection — these forward to the
@@ -1899,7 +1908,7 @@ function SelectionContextMenu({
           onClose();
         }}
       >
-        Toggle Sidebar
+        {t('selection.toggleSidebar')}
       </button>
       <button
         type="button"
@@ -1912,7 +1921,7 @@ function SelectionContextMenu({
           onClose();
         }}
       >
-        Toggle Markdown Editor
+        {t('selection.toggleMarkdown')}
       </button>
       <button
         type="button"
@@ -1925,7 +1934,7 @@ function SelectionContextMenu({
           onClose();
         }}
       >
-        Toggle Canvas
+        {t('selection.toggleCanvas')}
       </button>
       <button
         type="button"
@@ -1938,7 +1947,7 @@ function SelectionContextMenu({
           onClose();
         }}
       >
-        Toggle Chat
+        {t('selection.toggleChat')}
       </button>
       <hr />
       <button type="button" onClick={onClear}>Clear Selection</button>

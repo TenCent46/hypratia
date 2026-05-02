@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store';
 import {
   estimateUsdFromTokens,
@@ -13,6 +14,7 @@ export function ChatHeader({
   streaming: boolean;
   onAbort: () => void;
 }) {
+  const { t } = useTranslation();
   const conversationId = useStore((s) => s.settings.lastConversationId);
   const conv = useStore((s) =>
     conversationId ? s.conversations.find((c) => c.id === conversationId) ?? null : null,
@@ -40,7 +42,7 @@ export function ChatHeader({
       ) : null}
       {streaming ? (
         <button type="button" className="abort" onClick={onAbort} title="⌘⌫ to stop">
-          Stop
+          {t('chat.stop')}
         </button>
       ) : null}
     </div>
