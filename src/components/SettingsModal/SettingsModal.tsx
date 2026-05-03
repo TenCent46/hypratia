@@ -11,9 +11,11 @@ import {
   formatUsd,
 } from '../../services/llm/costEstimator';
 import {
-  obsidianExporter,
-  type ExportSummary,
-} from '../../services/export/ObsidianExporter';
+  forceResyncNow,
+  formatLastSync,
+  NoVaultConfiguredError,
+} from '../../services/storage/ForceResync';
+import type { SyncSummary } from '../../services/export/VaultSync';
 import {
   defaultMarkdownStorageDir,
   resolveMarkdownStorageDir,
@@ -1403,17 +1405,21 @@ function ChatHistoryStorageSection() {
 
 function ObsidianVaultSection() {
   const vaultPath = useStore((s) => s.settings.obsidianVaultPath);
+  const lastResyncAt = useStore((s) => s.settings.lastResyncAt);
   const setVault = useStore((s) => s.setObsidianVault);
-  const conversations = useStore((s) => s.conversations);
-  const messages = useStore((s) => s.messages);
-  const nodes = useStore((s) => s.nodes);
-  const edges = useStore((s) => s.edges);
-  const attachmentList = useStore((s) => s.attachments);
 
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<ExportSummary | null>(null);
+  const [result, setResult] = useState<SyncSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [appDataPath, setAppDataPath] = useState<string | null>(null);
+
+  // Refresh the "X ago" label without needing user action — the formatted
+  // string is only as fresh as the last render otherwise.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(id);
+  }, []);
 
   async function pickVault() {
     setError(null);
@@ -1425,22 +1431,20 @@ function ObsidianVaultSection() {
     }
   }
 
-  async function exportNow() {
+  async function resyncNow() {
     if (!vaultPath) return;
     setBusy(true);
     setError(null);
     setResult(null);
     try {
-      const summary = await obsidianExporter.exportAll(vaultPath, {
-        conversations,
-        messages,
-        nodes,
-        edges,
-        attachments: attachmentList,
-      });
+      const { summary } = await forceResyncNow();
       setResult(summary);
     } catch (err) {
-      setError(String(err));
+      if (err instanceof NoVaultConfiguredError) {
+        setError('Pick a vault first.');
+      } else {
+        setError(String(err));
+      }
     } finally {
       setBusy(false);
     }
@@ -1458,7 +1462,9 @@ function ObsidianVaultSection() {
     <section className="settings-section">
       <h3>Obsidian vault</h3>
       <p className="muted">
-        Folder where conversations, nodes, and maps export as Markdown.
+        Hypratia autosaves to <code>Hypratia/</code> in this folder. Use
+        Force re-sync now when you want certainty that everything is on
+        disk this instant.
       </p>
       <div className="path-row">
         <code>{vaultPath ?? '(not set)'}</code>
@@ -1469,16 +1475,17 @@ function ObsidianVaultSection() {
       <button
         type="button"
         disabled={!vaultPath || busy}
-        onClick={exportNow}
+        onClick={resyncNow}
         className="primary"
       >
-        {busy ? 'Exporting…' : 'Export to Markdown'}
+        {busy ? 'Syncing…' : 'Force re-sync now'}
       </button>
+      <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+        Last synced {formatLastSync(lastResyncAt, now)}
+      </div>
       {result ? (
         <div className="result ok">
-          Exported {result.nodes} nodes, {result.conversations} conversations,{' '}
-          {result.maps} maps, {result.attachments} attachments.{' '}
-          {result.skipped.length} skipped.
+          Synced {result.canvases} canvas(es), {result.notes} note(s).
         </div>
       ) : null}
       {error ? <div className="result error">{error}</div> : null}

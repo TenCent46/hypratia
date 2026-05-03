@@ -247,6 +247,9 @@ export type Settings = {
   /** Plan 53 — opt-in: watch `{vault}/Hypratia/.mailbox/incoming` for the
    *  Obsidian companion plugin's payloads. Off by default. */
   mailboxWatcherEnabled?: boolean;
+  /** ISO timestamp of the last successful "Force re-sync now". UI uses
+   *  this to render a "Last synced 3 min ago" indicator. */
+  lastResyncAt?: string;
   /**
    * Folder where chat history exports as Markdown. Optional — when unset the
    * app falls back to `<appData>/LLM-Conversations`. Set via the "Local

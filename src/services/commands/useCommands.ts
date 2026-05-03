@@ -3,7 +3,11 @@ import { useReactFlow } from '@xyflow/react';
 import { useStore } from '../../store';
 import { dialog } from '../../services/dialog';
 import { storage } from '../../services/storage';
-import { obsidianExporter } from '../../services/export/ObsidianExporter';
+import {
+  forceResyncNow,
+  NoVaultConfiguredError,
+} from '../../services/storage/ForceResync';
+import { showToast } from '../../components/Toast/Toast';
 import { openTodayDailyNote } from '../daily/DailyNotes';
 import { confirmDangerTwice } from '../../lib/confirm';
 import { getCurrentEditor } from '../../features/knowledge/editor/editorRegistry';
@@ -777,22 +781,34 @@ export function useCommands(): Command[] {
         },
       },
       {
-        id: 'file.export',
-        title: 'Export to Markdown',
+        id: 'file.force-resync',
+        title: 'Force re-sync vault now',
         section: 'File',
-        shortcut: '⌘⇧E',
-        match: 'mod+shift+e',
+        shortcut: '⌘⇧R',
+        match: 'mod+shift+r',
         when: () => Boolean(obsidianVaultPath),
+        // Replaces the older "Export to Markdown" command. Autosave keeps
+        // the vault in step under the hood; this is the explicit "I want
+        // certainty right now" affordance — same operation surfaced from
+        // Settings → Vault and the canvas pane right-click menu.
         run: async () => {
-          if (!obsidianVaultPath) return;
-          const s = useStore.getState();
-          await obsidianExporter.exportAll(obsidianVaultPath, {
-            conversations: s.conversations,
-            messages: s.messages,
-            nodes: s.nodes,
-            edges: s.edges,
-            attachments: s.attachments,
-          });
+          try {
+            const { summary } = await forceResyncNow();
+            showToast({
+              message: `Synced ${summary.canvases} canvas(es), ${summary.notes} note(s)`,
+              tone: 'success',
+            });
+          } catch (err) {
+            if (err instanceof NoVaultConfiguredError) {
+              showToast({ message: 'Pick a vault first', tone: 'error' });
+              return;
+            }
+            console.error('[force-resync] failed', err);
+            showToast({
+              message: 'Re-sync failed — see console',
+              tone: 'error',
+            });
+          }
         },
       },
       {

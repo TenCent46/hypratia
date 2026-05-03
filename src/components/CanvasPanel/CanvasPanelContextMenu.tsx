@@ -31,8 +31,12 @@ export type CanvasPanelContextMenuProps = {
   onFitView: () => void;
   onFitToCanvas: () => void;
   onSetTool: (tool: CanvasTool) => void;
-  onExportObsidianCanvas?: () => void;
-  onSyncToVault?: () => void;
+  /**
+   * Single button replacing the older "Export as Obsidian Canvas" +
+   * "Sync to Vault" pair. Autosave handles the steady state; this is the
+   * "I want certainty right now" affordance.
+   */
+  onForceResync?: () => void;
   onClose: () => void;
 };
 
@@ -56,8 +60,7 @@ export function CanvasPanelContextMenu({
   onFitView,
   onFitToCanvas,
   onSetTool,
-  onExportObsidianCanvas,
-  onSyncToVault,
+  onForceResync,
   onClose,
 }: CanvasPanelContextMenuProps) {
   const { t } = useTranslation();
@@ -202,26 +205,18 @@ export function CanvasPanelContextMenu({
         shortcut="H"
         checked={canvasTool === 'hand'}
       />
-      {onExportObsidianCanvas || onSyncToVault ? <Separator /> : null}
-      {onExportObsidianCanvas ? (
-        <Item
-          onClick={() => {
-            onExportObsidianCanvas();
-            onClose();
-          }}
-          label="Export as Obsidian Canvas (.canvas)"
-          disabled={!hasNodes}
-        />
-      ) : null}
-      {onSyncToVault ? (
-        <Item
-          onClick={() => {
-            onSyncToVault();
-            onClose();
-          }}
-          label="Sync all canvases to Vault"
-          shortcut="⌘⇧E"
-        />
+      {onForceResync ? (
+        <>
+          <Separator />
+          <Item
+            onClick={() => {
+              onForceResync();
+              onClose();
+            }}
+            label="Force re-sync now"
+            shortcut="⌘⇧R"
+          />
+        </>
       ) : null}
       <Separator />
       <Item onClick={onClose} label={t('canvas.cancel')} shortcut="Esc" />

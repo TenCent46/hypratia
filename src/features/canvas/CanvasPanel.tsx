@@ -56,8 +56,10 @@ import {
   parseChatgptExport,
   type ImportedConversation,
 } from '../../services/capture/ChatgptImporter';
-import { writeCanvasFile } from '../../services/export/JsonCanvasExport';
-import { syncToVault } from '../../services/export/VaultSync';
+import {
+  forceResyncNow,
+  NoVaultConfiguredError,
+} from '../../services/storage/ForceResync';
 import { startMailboxWatcher } from '../../services/storage/MailboxWatcher';
 import { dialog } from '../../services/dialog';
 import type { PaneMenuControl } from '../../components/PanesContextMenu/PanesContextMenu';
@@ -575,6 +577,11 @@ export function CanvasPanel({
   const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(
     null,
   );
+  // True iff React Flow's `onConnect` fired during the current drag (i.e. the
+  // cursor on release was within `connectionRadius` of a real Handle DOM).
+  // When false, `onConnectEnd` synthesizes the edge from a node-rect hit-test
+  // so the connection acceptance matches HypConnectionLine's visual snap.
+  const connectionMadeRef = useRef(false);
   const [helperLines, setHelperLines] = useState<{
     vertical?: number;
     horizontal?: number;
@@ -916,26 +923,45 @@ export function CanvasPanel({
     }, 350);
   }
 
-  function onConnect(c: Connection) {
-    if (!c.source || !c.target || c.source === c.target) return;
+  /**
+   * Materialize a new canvas edge between two node ids. Shared between RF's
+   * `onConnect` (cursor near a Handle) and the `onConnectEnd` synthesize path
+   * (cursor inside a node rect but past `connectionRadius`). Rejects self-
+   * loops and duplicates so the synthesize path can't double-create.
+   */
+  function createCanvasEdge(sourceId: string, targetId: string) {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const exists = storeEdges.some(
+      (e) =>
+        (e.sourceNodeId === sourceId && e.targetNodeId === targetId) ||
+        (e.sourceNodeId === targetId && e.targetNodeId === sourceId),
+    );
+    if (exists) return;
     // Connecting two theme-kind nodes manually defaults to a `related` edge
     // (dashed). Auto-created parent-child edges are minted server-side via
     // `kind: 'parent'` and never go through this path.
-    const sourceNode = storeNodes.find((n) => n.id === c.source);
-    const targetNode = storeNodes.find((n) => n.id === c.target);
+    const sourceNode = storeNodes.find((n) => n.id === sourceId);
+    const targetNode = storeNodes.find((n) => n.id === targetId);
     const isThemeLink =
       sourceNode?.kind === 'theme' && targetNode?.kind === 'theme';
     const edge = addEdge({
-      sourceNodeId: c.source,
-      targetNodeId: c.target,
+      sourceNodeId: sourceId,
+      targetNodeId: targetId,
       ...(isThemeLink ? { kind: 'related' as const } : {}),
     });
     markEdgeJustCreated(edge.id);
-    void syncConnectedMarkdownLinks(c.source, c.target);
+    void syncConnectedMarkdownLinks(sourceId, targetId);
     setCanvasSelection(
-      [c.source, c.target],
+      [sourceId, targetId],
       Array.from(new Set([...selectedEdgeIds, edge.id])),
     );
+  }
+
+  function onConnect(c: Connection) {
+    // RF accepted via a real Handle drop — block the synthesize fallback.
+    connectionMadeRef.current = true;
+    if (!c.source || !c.target) return;
+    createCanvasEdge(c.source, c.target);
   }
 
   /**
@@ -956,6 +982,10 @@ export function CanvasPanel({
   }
 
   function onConnectStart(_e: unknown, params: { nodeId?: string | null }) {
+    connectionMadeRef.current = false;
+    // Clear any pre-existing native text selection so it can't finalize on
+    // the drag's pointer-up and surface as a "全選択" symptom on rejection.
+    window.getSelection()?.removeAllRanges();
     setConnectingFromNodeId(params.nodeId ?? null);
   }
 
@@ -965,6 +995,7 @@ export function CanvasPanel({
     // detect "empty" by inspecting the pointer's terminal element via the
     // event React Flow forwards. `react-flow__pane` is the background.
     let landed: 'pane' | 'node' | 'unknown' = 'unknown';
+    let landedNodeId: string | null = null;
     let screenX = 0;
     let screenY = 0;
     const startedFrom = connectingFromNodeId;
@@ -972,8 +1003,11 @@ export function CanvasPanel({
       const e = event as MouseEvent | TouchEvent;
       const target = (e as MouseEvent).target as HTMLElement | null;
       if (target) {
-        if (target.closest('.react-flow__node')) landed = 'node';
-        else if (target.closest('.react-flow__pane')) landed = 'pane';
+        const nodeEl = target.closest('.react-flow__node');
+        if (nodeEl) {
+          landed = 'node';
+          landedNodeId = (nodeEl as HTMLElement).getAttribute('data-id');
+        } else if (target.closest('.react-flow__pane')) landed = 'pane';
       }
       const me = e as MouseEvent;
       const te = e as TouchEvent;
@@ -987,6 +1021,20 @@ export function CanvasPanel({
     }
     setConnectingFromNodeId(null);
     setConnectionTargetNodeId(null);
+    // Synthesize the connection when the cursor landed inside a node's rect
+    // but RF rejected it for being past `connectionRadius` of any Handle —
+    // this is the case HypConnectionLine visually snapped to a side-midpoint
+    // for. Without this, the visual promised a connection the acceptance
+    // logic never honored, and the dashed line silently vanishes.
+    if (
+      landed === 'node' &&
+      startedFrom &&
+      landedNodeId &&
+      landedNodeId !== startedFrom &&
+      !connectionMadeRef.current
+    ) {
+      createCanvasEdge(startedFrom, landedNodeId);
+    }
     if (landed === 'pane' && startedFrom && screenX > 0) {
       const flowPos = flow.screenToFlowPosition({ x: screenX, y: screenY });
       setConnectionEndMenu({
@@ -1092,70 +1140,31 @@ export function CanvasPanel({
   }
 
   /**
-   * Plan 52 — sync every conversation Hypratia owns into the vault under
-   * `Hypratia/`. One-way: never writes outside that subtree, never modifies
-   * user-owned files. Idempotent for canvases / sidecars Hypratia owns.
+   * Single user-facing "I want certainty right now" sync. Replaces the
+   * older Export-as-Obsidian-Canvas + Sync-to-Vault pair: autosave handles
+   * the steady state, and this is the button users press when they need to
+   * see the manifest update *now*. Picks a vault on first use if missing.
    */
-  async function syncEverythingToVault() {
-    const state = useStore.getState();
-    let vaultPath = state.settings.obsidianVaultPath;
-    if (!vaultPath) {
-      const picked = await dialog.pickFolder();
-      if (!picked) return;
-      vaultPath = picked;
-      state.setObsidianVault(picked);
-    }
+  async function runForceResync() {
     try {
-      const summary = await syncToVault({
-        vaultPath,
-        conversations: state.conversations,
-        nodes: state.nodes,
-        edges: state.edges,
+      const state = useStore.getState();
+      if (!state.settings.obsidianVaultPath) {
+        const picked = await dialog.pickFolder();
+        if (!picked) return;
+        state.setObsidianVault(picked);
+      }
+      const { summary } = await forceResyncNow();
+      showToast({
+        message: `Synced ${summary.canvases} canvas(es), ${summary.notes} note(s)`,
+        tone: 'success',
       });
-      console.info(
-        `[vault-sync] synced ${summary.canvases} canvas(es), ${summary.notes} note(s) to ${summary.vaultPath}/Hypratia`,
-      );
     } catch (err) {
-      console.error('[vault-sync] failed', err);
-    }
-  }
-
-  /**
-   * Plan 48 — write the current conversation's canvas as a `.canvas` file
-   * (plus long-body sidecar `.md` notes) into the user's Obsidian vault.
-   * Uses the configured vault if set; otherwise prompts for a folder once.
-   */
-  async function exportObsidianCanvas() {
-    if (!conversationId) return;
-    const state = useStore.getState();
-    let vaultPath = state.settings.obsidianVaultPath;
-    if (!vaultPath) {
-      const picked = await dialog.pickFolder();
-      if (!picked) return;
-      vaultPath = picked;
-      // Persist so subsequent exports are one-click.
-      state.setObsidianVault(picked);
-    }
-    const conv = state.conversations.find((c) => c.id === conversationId);
-    const title = conv?.title ?? 'Untitled';
-    const nodesForCanvas = state.nodes.filter(
-      (n) => n.conversationId === conversationId,
-    );
-    const nodeIdSet = new Set(nodesForCanvas.map((n) => n.id));
-    const edgesForCanvas = state.edges.filter(
-      (e) => nodeIdSet.has(e.sourceNodeId) && nodeIdSet.has(e.targetNodeId),
-    );
-    try {
-      const result = await writeCanvasFile({
-        vaultPath,
-        conversationId,
-        conversationTitle: title,
-        nodes: nodesForCanvas,
-        edges: edgesForCanvas,
-      });
-      console.info('[obsidian-canvas] exported', result.canvasPath, '+', result.sidecarPaths.length, 'notes');
-    } catch (err) {
-      console.error('[obsidian-canvas] export failed', err);
+      if (err instanceof NoVaultConfiguredError) {
+        showToast({ message: 'Pick a vault first', tone: 'error' });
+        return;
+      }
+      console.error('[force-resync] failed', err);
+      showToast({ message: 'Re-sync failed — see console', tone: 'error' });
     }
   }
 
@@ -2229,7 +2238,7 @@ export function CanvasPanel({
         dragOver ? ' dragging-over' : ''
       }${viewMode === 'titles' ? ' canvas-titles-only' : ''}${
         edgeDetach ? ' is-edge-detaching' : ''
-      }`}
+      }${connectingFromNodeId ? ' is-connecting' : ''}`}
       onPointerDownCapture={onCanvasPointerDown}
       onContextMenu={onCanvasContextMenu}
       onDragOver={onDragOver}
@@ -2540,8 +2549,7 @@ export function CanvasPanel({
           onFitView={fitCanvasView}
           onFitToCanvas={fitToCanvasEdges}
           onSetTool={setCanvasTool}
-          onExportObsidianCanvas={() => void exportObsidianCanvas()}
-          onSyncToVault={() => void syncEverythingToVault()}
+          onForceResync={() => void runForceResync()}
           onClose={() => setPaneMenu(null)}
         />
       ) : null}

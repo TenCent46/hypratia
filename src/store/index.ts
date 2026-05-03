@@ -263,6 +263,8 @@ type State = {
   setBudgets: (budgets: Budgets) => void;
   /** Plan 53 — toggle Obsidian-mailbox polling on/off. Persists. */
   setMailboxWatcherEnabled: (enabled: boolean) => void;
+  /** Record the timestamp of the last successful "Force re-sync now". */
+  setLastResyncAt: (iso: string) => void;
   setChatTabsAutoHide: (autoHide: boolean) => void;
   setChatTabsInSidebar: (inSidebar: boolean) => void;
   reopenLastClosedConversation: () => ID | null;
@@ -1158,6 +1160,11 @@ export const useStore = create<State>()(
     setMailboxWatcherEnabled: (enabled) =>
       set((s) => ({
         settings: { ...s.settings, mailboxWatcherEnabled: enabled },
+      })),
+
+    setLastResyncAt: (iso) =>
+      set((s) => ({
+        settings: { ...s.settings, lastResyncAt: iso },
       })),
 
     setMarkdownStorageDir: (path) =>
