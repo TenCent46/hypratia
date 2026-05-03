@@ -124,6 +124,7 @@ const zh: Strings = {
     summary: '{{nodes}} 个笔记,{{edges}} 个链接',
     ask: '提问',
     search: '搜索',
+    searchWithLlm: '用 LLM 搜索',
     openMarkdown: '打开 Markdown',
     copyLinks: '复制 Markdown 链接',
     addLinks: '在所选笔记之间添加链接',

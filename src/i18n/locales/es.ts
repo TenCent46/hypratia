@@ -127,6 +127,7 @@ const es: Strings = {
     summary: '{{nodes}} notas, {{edges}} enlaces',
     ask: 'Preguntar',
     search: 'Buscar',
+    searchWithLlm: 'Buscar con LLM',
     openMarkdown: 'Abrir Markdown',
     copyLinks: 'Copiar enlaces Markdown',
     addLinks: 'Añadir enlace entre notas seleccionadas',

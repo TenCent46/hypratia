@@ -1,6 +1,7 @@
 import { useStore } from '../store';
 import { ConversationSwitcher } from './ConversationSwitcher/ConversationSwitcher';
 import { ViewModeToggle } from './ViewModeToggle/ViewModeToggle';
+import { CostBadge } from './Header/CostBadge';
 
 export function Header() {
   const setSearchOpen = useStore((s) => s.setSearchOpen);
@@ -15,6 +16,7 @@ export function Header() {
       <ConversationSwitcher />
       <ViewModeToggle />
       <span className="header-spacer" />
+      <CostBadge />
       <button
         type="button"
         className="header-icon"

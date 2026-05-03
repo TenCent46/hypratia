@@ -31,6 +31,8 @@ export type CanvasPanelContextMenuProps = {
   onFitView: () => void;
   onFitToCanvas: () => void;
   onSetTool: (tool: CanvasTool) => void;
+  onExportObsidianCanvas?: () => void;
+  onSyncToVault?: () => void;
   onClose: () => void;
 };
 
@@ -54,6 +56,8 @@ export function CanvasPanelContextMenu({
   onFitView,
   onFitToCanvas,
   onSetTool,
+  onExportObsidianCanvas,
+  onSyncToVault,
   onClose,
 }: CanvasPanelContextMenuProps) {
   const { t } = useTranslation();
@@ -198,6 +202,27 @@ export function CanvasPanelContextMenu({
         shortcut="H"
         checked={canvasTool === 'hand'}
       />
+      {onExportObsidianCanvas || onSyncToVault ? <Separator /> : null}
+      {onExportObsidianCanvas ? (
+        <Item
+          onClick={() => {
+            onExportObsidianCanvas();
+            onClose();
+          }}
+          label="Export as Obsidian Canvas (.canvas)"
+          disabled={!hasNodes}
+        />
+      ) : null}
+      {onSyncToVault ? (
+        <Item
+          onClick={() => {
+            onSyncToVault();
+            onClose();
+          }}
+          label="Sync all canvases to Vault"
+          shortcut="⌘⇧E"
+        />
+      ) : null}
       <Separator />
       <Item onClick={onClose} label={t('canvas.cancel')} shortcut="Esc" />
     </div>

@@ -2,7 +2,7 @@
   "name": "hypratia-memory-canvas",
   "private": true,
   "version": "1.1.0-beta.1",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,12 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check:knowledge": "node --experimental-strip-types scripts/knowledge-core-check.ts",
+    "check:sidecar": "node --experimental-strip-types scripts/sidecar-check.ts",
+    "check:wikilinks": "node --experimental-strip-types scripts/wikilinks-check.ts",
+    "check:wikilink-resolver": "node --experimental-strip-types scripts/wikilink-resolver-check.ts",
+    "check:wikilink-dispatch": "node --experimental-strip-types scripts/wikilink-dispatch-check.ts",
+    "check:migration": "node --experimental-strip-types scripts/migrate-legacy-vault-check.ts",
+    "migrate:legacy-vault": "node --experimental-strip-types scripts/migrate-legacy-vault.ts",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -35,6 +35,19 @@ export type Project = {
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
+/** Plan 51 — non-destructive view modes for assistant messages. */
+export type LaconicView = 'original' | 'laconic' | 'outline' | 'actions';
+
+/** Cached derived view of a message's content. Original is never overwritten. */
+export type MessageDerivedView = {
+  text: string;
+  /** Engine that produced this view ('local' = free heuristics, 'cheap-llm' = L2). */
+  engine: 'local' | 'cheap-llm';
+  /** Bumps per release; cache invalidates when promptVersion no longer matches. */
+  promptVersion: string;
+  generatedAt: string;
+};
+
 export type Message = {
   id: ID;
   conversationId: ID;
@@ -54,6 +67,16 @@ export type Message = {
   model?: ModelRef;
   usage?: { input: number; output: number };
   attachmentIds?: ID[];
+  // --- Plan 51 — Laconic View / derivative views ---
+  /** sha-256(content) truncated, used as cache key for derivative views. */
+  contentHash?: string;
+  views?: {
+    laconic?: MessageDerivedView;
+    outline?: MessageDerivedView;
+    actions?: MessageDerivedView;
+  };
+  /** Per-message user choice, falls back to the conversation default. */
+  preferredView?: LaconicView;
 };
 
 export type CanvasNodeKind =
@@ -115,6 +138,26 @@ export type CanvasNode = {
 };
 
 export type EdgeKind = 'parent' | 'related';
+
+export type CostTier = 'L2' | 'L3';
+
+/** A single LLM call's spend record (plan 49). */
+export type CostRecord = {
+  at: string;
+  tier: CostTier;
+  provider: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  costUSD: number;
+};
+
+export type Budgets = {
+  /** Hard cap per calendar month for L2 (cheap) calls. 0 disables the tier. */
+  L2: number;
+  /** Hard cap per calendar month for L3 (premium) calls. 0 disables the tier. */
+  L3: number;
+};
 
 export type Edge = {
   id: ID;
@@ -197,6 +240,13 @@ export type PdfRef = {
 export type Settings = {
   workspaceName?: string;
   obsidianVaultPath?: string;
+  /** Plan 49 — LLM spend ring buffer (last 13 months trimmed at month boundary). */
+  costRecords?: CostRecord[];
+  /** Plan 49 — per-tier monthly budget caps. Defaults: L2 $5, L3 $0. */
+  budgets?: Budgets;
+  /** Plan 53 — opt-in: watch `{vault}/Hypratia/.mailbox/incoming` for the
+   *  Obsidian companion plugin's payloads. Off by default. */
+  mailboxWatcherEnabled?: boolean;
   /**
    * Folder where chat history exports as Markdown. Optional — when unset the
    * app falls back to `<appData>/LLM-Conversations`. Set via the "Local
@@ -209,6 +259,14 @@ export type Settings = {
   theme: Theme;
   providers: Partial<Record<ProviderId, ProviderConfig>>;
   defaultModel?: ModelRef;
+  /**
+   * Model used by the canvas "Search with LLM" feature. Independent from
+   * `defaultModel` so users can keep an expensive chat model active while
+   * searching with a free/fast model (e.g. Groq llama-3.3-70b-versatile).
+   * When unset, the modal falls back to Groq's first available model, then
+   * to the active chat model.
+   */
+  llmSearchModel?: ModelRef;
   systemPrompt?: string;
   dailyNotesFolder?: string;
   dailyNoteTemplate?: string;

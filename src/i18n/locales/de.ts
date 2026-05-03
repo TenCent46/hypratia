@@ -127,6 +127,7 @@ const de: Strings = {
     summary: '{{nodes}} Notizen, {{edges}} Verknüpfungen',
     ask: 'Fragen',
     search: 'Suchen',
+    searchWithLlm: 'Mit LLM suchen',
     openMarkdown: 'Markdown öffnen',
     copyLinks: 'Markdown-Links kopieren',
     addLinks: 'Verknüpfung zwischen Notizen erstellen',

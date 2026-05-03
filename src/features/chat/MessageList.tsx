@@ -37,6 +37,12 @@ import {
   saveFencedBlocksFromMessage,
 } from './saveCodeBlock';
 import type { Message } from '../../types';
+import {
+  compressLaconicLocally,
+  contentHash,
+  LACONIC_PROMPT_VERSION,
+  persistLaconicToSidecar,
+} from '../../services/views/laconic';
 
 export function MessageList({
   onRegenerate,
@@ -254,6 +260,72 @@ const MessageRow = memo(function MessageRow({
   const showActions =
     !message.streaming && message.role !== 'system' && message.content.trim();
   const thinking = message.streaming && !message.content.trim();
+
+  // Plan 51 — Laconic View. Always preserve the original content; if the
+  // user asked for the laconic view, derive (or read from cache) and render
+  // that instead. The derive cost is microseconds — no need to memo across
+  // renders.
+  const setMessagePreferredView = useStore((s) => s.setMessagePreferredView);
+  const cacheMessageView = useStore((s) => s.cacheMessageView);
+  const vaultPath = useStore((s) => s.settings.obsidianVaultPath);
+  const isLaconic =
+    message.role === 'assistant' &&
+    !message.streaming &&
+    message.preferredView === 'laconic';
+  const displayContent = useMemo(() => {
+    if (!isLaconic) return message.content;
+    const hash = contentHash(message.content);
+    const cached = message.views?.laconic;
+    if (
+      cached &&
+      cached.engine === 'local' &&
+      cached.promptVersion === LACONIC_PROMPT_VERSION &&
+      message.contentHash === hash
+    ) {
+      return cached.text;
+    }
+    const compressed = compressLaconicLocally(message.content, 'en');
+    const generatedAt = new Date().toISOString();
+    cacheMessageView(
+      message.id,
+      'laconic',
+      {
+        text: compressed,
+        engine: 'local',
+        promptVersion: LACONIC_PROMPT_VERSION,
+        generatedAt,
+      },
+      hash,
+    );
+    // Plan 51 + sidecar architecture — also persist the Laconic view to
+    // `Hypratia/.hypratia/sidecars/{messageId}.json` so the compressed text
+    // travels with the vault. No-op when no vault is configured.
+    void persistLaconicToSidecar({
+      messageId: message.id,
+      conversationId: message.conversationId,
+      laconic: {
+        text: compressed,
+        promptVersion: LACONIC_PROMPT_VERSION,
+        generatedAt,
+      },
+      contentHash: hash,
+      vaultPath,
+    }).catch((err: unknown) =>
+      console.warn('[laconic] sidecar persist failed', err),
+    );
+    return compressed;
+  }, [
+    isLaconic,
+    message.content,
+    message.contentHash,
+    message.views?.laconic,
+    message.id,
+    message.conversationId,
+    cacheMessageView,
+    vaultPath,
+  ]);
+  const canShowViewToggle =
+    message.role === 'assistant' && !message.streaming && message.content.trim();
   const hasFencedBlocks =
     message.role === 'assistant' &&
     !message.streaming &&
@@ -277,6 +349,30 @@ const MessageRow = memo(function MessageRow({
         {thinking ? <span className="status">thinking</span> : null}
         {message.streaming && !thinking ? <span className="status">streaming</span> : null}
         {message.errored ? <span className="status error">error</span> : null}
+        {canShowViewToggle ? (
+          <span
+            className="message-view-toggle"
+            role="group"
+            aria-label="Message view"
+          >
+            <button
+              type="button"
+              className={`message-view-btn${!isLaconic ? ' is-active' : ''}`}
+              onClick={() => setMessagePreferredView(message.id, 'original')}
+              title="Original (full message)"
+            >
+              Original
+            </button>
+            <button
+              type="button"
+              className={`message-view-btn${isLaconic ? ' is-active' : ''}`}
+              onClick={() => setMessagePreferredView(message.id, 'laconic')}
+              title="Laconic (verbosity removed, meaning preserved)"
+            >
+              Laconic
+            </button>
+          </span>
+        ) : null}
         {/*
           Drag-handle pattern: only this grip is `draggable=true`, so
           the rest of the row stays a normal selectable region. Setting
@@ -318,9 +414,9 @@ const MessageRow = memo(function MessageRow({
       ) : message.role === 'user' ? (
         <CollapsibleUserContent content={message.content} />
       ) : (
-        <div className="content">
+        <div className={`content${isLaconic ? ' is-laconic' : ''}`}>
           <MarkdownRenderer
-            markdown={message.content || (message.streaming ? '…' : '')}
+            markdown={displayContent || (message.streaming ? '…' : '')}
             streaming={message.streaming}
             onSaveCodeBlock={
               message.role === 'assistant' && !message.streaming

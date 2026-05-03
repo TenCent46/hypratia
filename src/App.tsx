@@ -25,7 +25,8 @@ import { SearchPalette } from './features/search/SearchPalette';
 import { CommandPalette } from './components/CommandPalette/CommandPalette';
 import { ShortcutsModal } from './components/CommandPalette/ShortcutsModal';
 import { QuickCapture } from './components/QuickCapture/QuickCapture';
-import { ToastHost } from './components/Toast/Toast';
+import { ToastHost, showToast } from './components/Toast/Toast';
+import { WikilinkAmbiguityChooser } from './components/WikilinkAmbiguityChooser/WikilinkAmbiguityChooser';
 import { AIPalette } from './features/ai-palette/AIPalette';
 import { GraphImportModal } from './features/graph-import/GraphImportModal';
 import { WorkspaceConfigModal } from './features/workspace-config/WorkspaceConfigModal';
@@ -287,6 +288,13 @@ function ReadyApp() {
         ? 'hidden'
         : 'shown',
   );
+  // Ref kept in sync with canvasPanelState so the once-bound
+  // `mc:open-canvas-node` listener can decide whether the pane needs to be
+  // shown without re-subscribing every render.
+  const canvasPanelStateRef = useRef<PanelState>(canvasPanelState);
+  useEffect(() => {
+    canvasPanelStateRef.current = canvasPanelState;
+  }, [canvasPanelState]);
   const [sidebarPanelState, setSidebarPanelStateRaw] = useState<PanelState>(() =>
     sidebarCollapsedForMenu ? 'hidden' : 'shown',
   );
@@ -662,6 +670,67 @@ function ReadyApp() {
     return () =>
       window.removeEventListener('mc:open-markdown-file', onOpenMarkdownFile);
   }, [openMarkdownFile]);
+
+  // High-level "open this Hypratia node" handler. Closes the wikilink-click
+  // UX loop: a clicked `[[Title]]` that resolves to a Hypratia-owned node
+  // routes through `mc:open-canvas-node`, and we reveal the canvas pane,
+  // switch conversation if needed, select the node, then re-emit the
+  // pre-existing `mc:focus-canvas-node` once the canvas has mounted so the
+  // existing `CanvasPanel` listener centers the viewport.
+  //
+  // The lower-level `mc:focus-canvas-node` is intentionally still supported
+  // for callers that already know the canvas is visible (no view-state work
+  // needed). This handler does NOT consume that event — it only emits it.
+  useEffect(() => {
+    function onOpenCanvasNode(e: Event) {
+      const detail = (e as CustomEvent<{
+        nodeId?: string;
+        conversationId?: string;
+      }>).detail;
+      if (!detail?.nodeId) return;
+      const state = useStore.getState();
+      const node = state.nodes.find((n) => n.id === detail.nodeId);
+      if (!node) {
+        showToast({
+          message: 'Hypratia node not found in this workspace.',
+          tone: 'error',
+        });
+        return;
+      }
+      // Switch the active conversation if the target node lives elsewhere —
+      // otherwise the canvas would render with the wrong node set.
+      if (node.conversationId !== state.settings.lastConversationId) {
+        state.setActiveConversation(node.conversationId);
+      }
+      // Select the node so it's highlighted on arrival.
+      state.setCanvasSelection([detail.nodeId], []);
+      // Reveal the canvas pane if it was hidden. We use functional state
+      // accessors so this useEffect doesn't need to re-bind on every state
+      // change — the listener installed once at mount picks up the current
+      // value via the closure-stable `setCanvasPanelStateRaw` setter.
+      const wasVisible = canvasPanelStateRef.current === 'shown';
+      if (!wasVisible) {
+        setCanvasPanelStateRaw('shown');
+      }
+      // Defer the focus dispatch so the canvas has time to mount + measure
+      // when transitioning from hidden. Two animation frames + a small
+      // grace period covers cold mounts; immediate dispatch is harmless
+      // when the pane was already visible.
+      const delay = wasVisible ? 0 : 80;
+      window.setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('mc:focus-canvas-node', {
+            detail: { nodeId: detail.nodeId },
+          }),
+        );
+      }, delay);
+    }
+    window.addEventListener('mc:open-canvas-node', onOpenCanvasNode);
+    return () =>
+      window.removeEventListener('mc:open-canvas-node', onOpenCanvasNode);
+    // setCanvasPanelStateRaw is referentially stable; canvasPanelStateRef is
+    // a ref. Re-binding the listener every render would just shuffle work.
+  }, []);
 
   useEffect(() => {
     function onOpenAttachmentPreview(e: Event) {
@@ -1219,6 +1288,7 @@ function ReadyApp() {
       <PdfViewer />
       <Onboarding />
       <ToastHost />
+      <WikilinkAmbiguityChooser />
     </div>
   );
 }

@@ -19,6 +19,12 @@ import {
   absoluteMarkdownPath,
   resolveMarkdownRoot,
 } from '../storage/MarkdownFileService';
+import {
+  buildNaturalWikilink,
+  buildTitleCounts,
+  mergeAliases,
+  wikiTitle,
+} from '../markdown/wikilinks';
 import { useStore } from '../../store';
 
 export type ExportSnapshot = {
@@ -44,9 +50,13 @@ const DIR_MAPS = 'LLM-Maps';
 const DIR_DAILY = 'LLM-Daily';
 const DIR_ATTACHMENTS = 'LLM-Attachments';
 
-function nodeWikilink(node: CanvasNode): string {
-  const alias = (node.title || node.id).replace(/\|/g, '\\|');
-  return `[[node-${node.id}|${alias}]]`;
+/**
+ * Build a vault-relative path (without `.md`) for a node — used as the
+ * disambiguator in path-form wikilinks `[[path|Title]]`.
+ */
+function vaultPathForNode(node: CanvasNode): string {
+  const filename = safeFilename(`node-${node.id}`, node.title, '.md');
+  return `${DIR_NODES}/${filename.replace(/\.(md|markdown)$/i, '')}`;
 }
 
 async function ensureDir(path: string): Promise<void> {
@@ -182,6 +192,10 @@ export class ObsidianExporter {
 
     // Nodes
     const nodeById = new Map(snap.nodes.map((n) => [n.id, n]));
+    // Title-collision counts drive the natural-wikilink builder. Computed
+    // once per export run; fed to every link emission below so duplicate
+    // titles fall back to `[[path|Title]]` instead of leaking node ids.
+    const titleCounts = buildTitleCounts(snap.nodes);
     for (const node of snap.nodes) {
       const linked = new Set<string>([
         ...(outgoing.get(node.id) ?? []),
@@ -193,7 +207,17 @@ export class ObsidianExporter {
       const linkLines = linkedNodeIds
         .map((id) => nodeById.get(id))
         .filter((n): n is CanvasNode => Boolean(n))
-        .map((n) => `- ${nodeWikilink(n)}`);
+        .map(
+          (n) =>
+            `- ${buildNaturalWikilink(
+              {
+                title: wikiTitle(n),
+                path: vaultPathForNode(n),
+                hypratiaId: n.id,
+              },
+              titleCounts,
+            )}`,
+        );
       const attachmentEmbeds = (node.attachmentIds ?? [])
         .map((id) => snap.attachments.find((a) => a.id === id))
         .filter((a): a is Attachment => Boolean(a))
@@ -212,12 +236,23 @@ export class ObsidianExporter {
         (linkLines.length
           ? `\n\n## Linked\n\n${linkLines.join('\n')}\n`
           : '');
+      // Merge `aliases` so Obsidian can resolve `[[Title]]` even when the
+      // file lives under `LLM-Nodes/node-{id}-{slug}.md`. User-set aliases
+      // (in `node.frontmatter.aliases`) survive — we only ADD the current
+      // title if it isn't already there.
+      const existingAliases = Array.isArray(
+        (node.frontmatter as Record<string, unknown> | undefined)?.aliases,
+      )
+        ? ((node.frontmatter as Record<string, unknown>).aliases as string[])
+        : undefined;
+      const aliases = mergeAliases(existingAliases, wikiTitle(node));
       const content = buildMarkdown(
         {
           ...(node.frontmatter ?? {}),
           id: node.id,
           conversationId: node.conversationId,
           title: node.title,
+          aliases,
           createdAt: node.createdAt,
           updatedAt: node.updatedAt,
           tags: node.tags,
@@ -260,7 +295,19 @@ export class ObsidianExporter {
         .join('\n---\n\n');
       const convNodes = snap.nodes.filter((n) => n.conversationId === conv.id);
       const mapSection = convNodes.length
-        ? `\n\n## Map\n\n${convNodes.map((n) => `- ${nodeWikilink(n)}`).join('\n')}\n`
+        ? `\n\n## Map\n\n${convNodes
+            .map(
+              (n) =>
+                `- ${buildNaturalWikilink(
+                  {
+                    title: wikiTitle(n),
+                    path: vaultPathForNode(n),
+                    hypratiaId: n.id,
+                  },
+                  titleCounts,
+                )}`,
+            )
+            .join('\n')}\n`
         : '';
       const body = `${transcript || '_(no messages)_'}${mapSection}`;
       const content = buildMarkdown(

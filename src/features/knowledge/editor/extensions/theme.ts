@@ -48,6 +48,81 @@ export const kbSourceHighlightStyle = HighlightStyle.define([
   { tag: t.meta, color: 'var(--text-mute)' },
 ]);
 
+/**
+ * Shared styles for the CodeMirror search / replace panel (Cmd+F).
+ * Both `kbLivePreviewTheme` and `kbSourceTheme` spread this so the panel
+ * always tracks the active app theme — without this, dark themes painted
+ * white-on-white because the input field used browser defaults while the
+ * panel inherited the dark-theme `color: var(--text)`.
+ */
+const cmSearchPanelStyle: Record<string, Record<string, string>> = {
+  '.cm-panels': {
+    backgroundColor: 'var(--bg)',
+    color: 'var(--text)',
+    borderTop: '1px solid var(--border)',
+  },
+  '.cm-panels.cm-panels-top': {
+    borderBottom: '1px solid var(--border)',
+    borderTop: 'none',
+  },
+  '.cm-panel.cm-search': {
+    padding: '6px 8px',
+    color: 'var(--text)',
+  },
+  '.cm-panel.cm-search input.cm-textfield': {
+    backgroundColor: 'var(--bg-soft)',
+    color: 'var(--text)',
+    border: '1px solid var(--border)',
+    borderRadius: '4px',
+    padding: '3px 6px',
+    fontSize: '12px',
+  },
+  '.cm-panel.cm-search input.cm-textfield:focus': {
+    borderColor: 'var(--accent)',
+    outline: 'none',
+    boxShadow: '0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent)',
+  },
+  '.cm-panel.cm-search input.cm-textfield::placeholder': {
+    color: 'var(--text-mute)',
+  },
+  '.cm-panel.cm-search label': {
+    color: 'var(--text-mute)',
+    fontSize: '12px',
+  },
+  '.cm-panel.cm-search input[type="checkbox"]': {
+    accentColor: 'var(--accent)',
+  },
+  '.cm-panel.cm-search .cm-button, .cm-panel.cm-search button': {
+    backgroundColor: 'var(--bg-soft)',
+    color: 'var(--text)',
+    border: '1px solid var(--border)',
+    borderRadius: '4px',
+    padding: '2px 8px',
+    fontSize: '12px',
+    cursor: 'pointer',
+  },
+  '.cm-panel.cm-search .cm-button:hover, .cm-panel.cm-search button:hover': {
+    backgroundColor: 'color-mix(in srgb, var(--accent) 14%, var(--bg-soft))',
+  },
+  '.cm-panel.cm-search button[name="close"]': {
+    backgroundColor: 'transparent',
+    border: 'none',
+    color: 'var(--text-mute)',
+    fontSize: '14px',
+  },
+  '.cm-panel.cm-search button[name="close"]:hover': {
+    color: 'var(--text)',
+    backgroundColor: 'var(--bg-soft)',
+  },
+  '.cm-searchMatch': {
+    backgroundColor: 'color-mix(in srgb, var(--accent) 30%, transparent)',
+  },
+  '.cm-searchMatch.cm-searchMatch-selected': {
+    backgroundColor: 'color-mix(in srgb, var(--accent) 55%, transparent)',
+    color: 'var(--text)',
+  },
+};
+
 /** CodeMirror theme for the document editor. Hooks into app CSS variables. */
 export const kbLivePreviewTheme = EditorView.theme(
   {
@@ -94,14 +169,7 @@ export const kbLivePreviewTheme = EditorView.theme(
       textDecoration: 'underline',
       cursor: 'pointer',
     },
-    '.cm-panels': {
-      backgroundColor: 'var(--bg)',
-      color: 'var(--text)',
-      borderTop: '1px solid var(--border)',
-    },
-    '.cm-search input, .cm-search button': {
-      fontSize: '12px',
-    },
+    ...cmSearchPanelStyle,
   },
   { dark: false },
 );
@@ -152,6 +220,7 @@ export const kbSourceTheme = EditorView.theme(
       textDecoration: 'underline',
       cursor: 'pointer',
     },
+    ...cmSearchPanelStyle,
   },
   { dark: false },
 );

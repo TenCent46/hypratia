@@ -192,6 +192,34 @@ export function useCommands(): Command[] {
         },
       },
       {
+        id: 'chat.toggle-laconic',
+        title: 'Toggle Laconic View on the focused assistant message',
+        section: 'Chat',
+        shortcut: '⌘L',
+        match: 'mod+l',
+        // Plan 51 — flips the focused assistant message between Original
+        // and Laconic. We resolve the focused message id from the DOM (the
+        // chat row uses `data-message-id`) so the keybinding works without
+        // needing the message list to live in the store.
+        run: () => {
+          const active = document.activeElement as HTMLElement | null;
+          let row: HTMLElement | null = active?.closest('[data-message-id]') ?? null;
+          if (!row) {
+            const hovered = document.querySelector('.message:hover') as HTMLElement | null;
+            row = hovered;
+          }
+          const id = row?.getAttribute('data-message-id');
+          if (!id) return;
+          const state = useStore.getState();
+          const msg = state.messages.find((m) => m.id === id);
+          if (!msg || msg.role !== 'assistant') return;
+          state.setMessagePreferredView(
+            id,
+            msg.preferredView === 'laconic' ? 'original' : 'laconic',
+          );
+        },
+      },
+      {
         id: 'canvas.titles-only',
         title:
           viewMode === 'titles'

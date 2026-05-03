@@ -36,6 +36,47 @@ export function readFrontmatterId(text: string): string | null {
   }
 }
 
+/**
+ * Merge a Hypratia-owned frontmatter patch into an existing Markdown file
+ * **without** touching user-defined keys. The two-namespace rule:
+ *
+ *   - Keys prefixed `hypratia_` belong to Hypratia. They get replaced by
+ *     the patch (or removed when the patch sets the key to `undefined`).
+ *   - Every other key is user-owned (title, tags, aliases, plugin keys,
+ *     Properties UI values…). Those pass through verbatim.
+ *
+ * `body` is optional. When `undefined`, the existing body is preserved —
+ * which is what most callers want (we are updating provenance metadata,
+ * not the prose). Pass an explicit string to replace the body.
+ *
+ * The patch can carry only `hypratia_*` keys; non-prefixed entries are
+ * dropped silently so accidental misuse can't corrupt the user's vault.
+ */
+export function mergeMarkdownWithHypratia(
+  existingMarkdown: string,
+  hypratiaPatch: Record<string, unknown>,
+  body?: string,
+): string {
+  const parsed = matter(existingMarkdown ?? '');
+  const userData: Record<string, unknown> = { ...parsed.data };
+
+  // Apply the hypratia_* patch in place. We deliberately keep keys that
+  // appear in `userData` but not in `hypratiaPatch` — drift between
+  // releases (e.g. a key we used to write but no longer set) is ignored
+  // rather than scrubbed, so old data survives a downgrade.
+  for (const [key, value] of Object.entries(hypratiaPatch)) {
+    if (!key.startsWith('hypratia_')) continue;
+    if (value === undefined) {
+      delete userData[key];
+    } else {
+      userData[key] = value;
+    }
+  }
+
+  const nextBody = body !== undefined ? body : parsed.content;
+  return buildMarkdown(userData, nextBody);
+}
+
 // ---- internal -----------------------------------------------------------
 
 function stringifyFrontmatter(fm: Record<string, unknown>): string {

@@ -2,10 +2,13 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type {
   Attachment,
+  Budgets,
   CanvasNode,
   Conversation,
   ConversationKind,
+  CostRecord,
   Edge,
+  EdgeKind,
   EditorMode,
   ID,
   Message,
@@ -202,6 +205,15 @@ type State = {
   appendMessageContent: (id: ID, delta: string) => void;
   finalizeMessage: (id: ID, patch?: Partial<Omit<Message, 'id' | 'conversationId'>>) => void;
   errorMessage: (id: ID, errorMessage: string) => void;
+  /** Plan 51 — set the per-message Laconic / Original view preference. */
+  setMessagePreferredView: (id: ID, view: Message['preferredView']) => void;
+  /** Plan 51 — cache a generated derivative view (laconic / outline / actions). */
+  cacheMessageView: (
+    id: ID,
+    kind: 'laconic' | 'outline' | 'actions',
+    view: NonNullable<Message['views']>['laconic'],
+    contentHash: string,
+  ) => void;
   removeMessage: (id: ID) => void;
   setConversationModel: (id: ID, model: ModelRef | undefined) => void;
   setConversationSystemPrompt: (id: ID, prompt: string | undefined) => void;
@@ -228,6 +240,8 @@ type State = {
 
   addEdge: (input: Omit<Edge, 'id' | 'createdAt'>) => Edge;
   removeEdge: (id: ID) => void;
+  updateEdgeLabel: (id: ID, label: string | undefined) => void;
+  updateEdgeKind: (id: ID, kind: EdgeKind | undefined) => void;
 
   /**
    * Pop the newest entry off `undoStack` and re-apply it: a removed
@@ -244,6 +258,11 @@ type State = {
   setViewport: (conversationId: ID, viewport: Viewport) => void;
   setObsidianVault: (path: string) => void;
   setMarkdownStorageDir: (path: string | undefined) => void;
+  /** Plan 49 — record one LLM call's spend, trim ring buffer to last 13 months. */
+  recordCost: (record: CostRecord) => void;
+  setBudgets: (budgets: Budgets) => void;
+  /** Plan 53 — toggle Obsidian-mailbox polling on/off. Persists. */
+  setMailboxWatcherEnabled: (enabled: boolean) => void;
   setChatTabsAutoHide: (autoHide: boolean) => void;
   setChatTabsInSidebar: (inSidebar: boolean) => void;
   reopenLastClosedConversation: () => ID | null;
@@ -257,6 +276,7 @@ type State = {
   setProvider: (id: ProviderId, patch: Partial<ProviderConfig>) => void;
   removeProvider: (id: ProviderId) => void;
   setDefaultModel: (model: ModelRef | undefined) => void;
+  setLlmSearchModel: (model: ModelRef | undefined) => void;
   setSystemPrompt: (prompt: string | undefined) => void;
   setEditorMode: (mode: EditorMode) => void;
   setMarkdownAutoSave: (enabled: boolean) => void;
@@ -790,6 +810,26 @@ export const useStore = create<State>()(
         ),
       })),
 
+    setMessagePreferredView: (id, view) =>
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === id ? { ...m, preferredView: view } : m,
+        ),
+      })),
+
+    cacheMessageView: (id, kind, view, contentHash) =>
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === id
+            ? {
+                ...m,
+                contentHash,
+                views: { ...(m.views ?? {}), [kind]: view },
+              }
+            : m,
+        ),
+      })),
+
     removeMessage: (id) =>
       set((s) => ({
         messages: s.messages.filter((m) => m.id !== id),
@@ -998,6 +1038,24 @@ export const useStore = create<State>()(
         };
       }),
 
+    updateEdgeLabel: (id, label) =>
+      set((s) => ({
+        edges: s.edges.map((e) =>
+          e.id === id
+            ? { ...e, ...(label === undefined ? { label: undefined } : { label }) }
+            : e,
+        ),
+      })),
+
+    updateEdgeKind: (id, kind) =>
+      set((s) => ({
+        edges: s.edges.map((e) =>
+          e.id === id
+            ? { ...e, ...(kind === undefined ? { kind: undefined } : { kind }) }
+            : e,
+        ),
+      })),
+
     undoCanvasDelete: () => {
       let restored = false;
       set((s) => {
@@ -1073,6 +1131,34 @@ export const useStore = create<State>()(
 
     setObsidianVault: (path) =>
       set((s) => ({ settings: { ...s.settings, obsidianVaultPath: path } })),
+
+    recordCost: (record) =>
+      set((s) => {
+        // Drop records older than 13 months at the month boundary so the
+        // ring buffer doesn't grow without bound. Cheap to do per write.
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() - 13);
+        const cutoffIso = cutoff.toISOString();
+        const trimmed = (s.settings.costRecords ?? []).filter(
+          (r) => r.at >= cutoffIso,
+        );
+        return {
+          settings: {
+            ...s.settings,
+            costRecords: [...trimmed, record],
+          },
+        };
+      }),
+
+    setBudgets: (budgets) =>
+      set((s) => ({
+        settings: { ...s.settings, budgets },
+      })),
+
+    setMailboxWatcherEnabled: (enabled) =>
+      set((s) => ({
+        settings: { ...s.settings, mailboxWatcherEnabled: enabled },
+      })),
 
     setMarkdownStorageDir: (path) =>
       set((s) => ({
@@ -1178,6 +1264,9 @@ export const useStore = create<State>()(
 
     setDefaultModel: (model) =>
       set((s) => ({ settings: { ...s.settings, defaultModel: model } })),
+
+    setLlmSearchModel: (model) =>
+      set((s) => ({ settings: { ...s.settings, llmSearchModel: model } })),
 
     setSystemPrompt: (prompt) =>
       set((s) => ({ settings: { ...s.settings, systemPrompt: prompt } })),

@@ -1,0 +1,10 @@
+{
+  "id": "hypratia-companion",
+  "name": "Hypratia",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Hypratia companion: refresh canvas geometry from sidecar JSON, send selections to Hypratia, and open Hypratia-owned canvases in the desktop app.",
+  "author": "Hypratia",
+  "authorUrl": "https://hypratia.com",
+  "isDesktopOnly": true
+}

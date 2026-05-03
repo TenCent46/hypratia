@@ -5,7 +5,11 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import { preprocessMarkdown } from '../../../services/markdown/preprocess';
-import { resolveKbWikilinkTargetAsync, preloadKbFiles } from './extensions/wikilink';
+import { preloadKbFiles } from './extensions/wikilink';
+import {
+  dispatchWikilinkResolution,
+  resolveClickedWikilink,
+} from '../../../services/markdown/wikilinkResolverFs';
 
 /**
  * Reading-mode renderer that reuses the standard `react-markdown` stack
@@ -54,18 +58,15 @@ export function KbReadingView({
                   className="wikilink"
                   onClick={async (e) => {
                     e.preventDefault();
-                    const path = await resolveKbWikilinkTargetAsync(rootPath, target);
-                    if (path) {
-                      window.dispatchEvent(
-                        new CustomEvent('mc:open-markdown-file', { detail: { path } }),
-                      );
-                    } else {
-                      window.dispatchEvent(
-                        new CustomEvent('mc:create-kb-note', {
-                          detail: { name: target },
-                        }),
-                      );
-                    }
+                    // Frontmatter-aware resolution: if the target file
+                    // owns a `hypratia_id` that matches a node in the
+                    // store, the canvas opens it; otherwise the markdown
+                    // file opens; on title collision, a chooser surfaces.
+                    const resolution = await resolveClickedWikilink(
+                      rootPath,
+                      target,
+                    );
+                    dispatchWikilinkResolution(resolution, target);
                   }}
                 >
                   {children}

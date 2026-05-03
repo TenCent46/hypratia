@@ -133,6 +133,7 @@ const en = {
     summary: '{{nodes}} notes, {{edges}} links',
     ask: 'Ask',
     search: 'Search',
+    searchWithLlm: 'Search with LLM',
     openMarkdown: 'Open Markdown',
     copyLinks: 'Copy Markdown Links',
     addLinks: 'Add Link Between Selected Notes',

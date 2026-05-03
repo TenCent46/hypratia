@@ -246,4 +246,8 @@ Telemetryはありません。ネットワーク通信は、設定したAI provi
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Hypratia Coreは [GNU AGPLv3](LICENSE) のもとで公開されています。
+
+ただし、Hypratiaの名称、ロゴ、Webサイト、デザイン素材、公式ビルド、商用拡張機能はAGPLの対象外です。
+
+公式Pro版、商用利用サポート、Enterprise導入については別途Commercial Licenseを提供します。詳細は [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) を参照してください。

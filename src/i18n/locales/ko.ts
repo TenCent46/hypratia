@@ -126,6 +126,7 @@ const ko: Strings = {
     summary: '노트 {{nodes}}개, 링크 {{edges}}개',
     ask: '질문',
     search: '검색',
+    searchWithLlm: 'LLM으로 검색',
     openMarkdown: 'Markdown 열기',
     copyLinks: 'Markdown 링크 복사',
     addLinks: '선택한 노트 사이에 링크 추가',

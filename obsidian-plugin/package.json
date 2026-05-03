@@ -1,0 +1,21 @@
+{
+  "name": "hypratia-companion",
+  "version": "0.1.0",
+  "description": "Obsidian companion plugin for Hypratia (plan v1.2/53).",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.0",
+    "obsidian": "^1.7.2",
+    "tslib": "^2.6.3",
+    "typescript": "^5.4.0"
+  }
+}

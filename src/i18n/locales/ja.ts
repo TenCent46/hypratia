@@ -126,6 +126,7 @@ const ja: Strings = {
     summary: '{{nodes}} ノート、{{edges}} リンク',
     ask: '質問',
     search: '検索',
+    searchWithLlm: 'LLMで検索',
     openMarkdown: 'Markdownを開く',
     copyLinks: 'Markdownリンクをコピー',
     addLinks: '選択したノートの間にリンクを追加',

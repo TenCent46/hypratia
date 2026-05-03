@@ -13,6 +13,10 @@ import {
   type MarkdownTreeNode,
 } from '../../../../services/storage/MarkdownFileService';
 import { flattenMarkdownTree } from '../../../../services/markdown/MarkdownContextResolver';
+import {
+  dispatchWikilinkResolution,
+  resolveClickedWikilink,
+} from '../../../../services/markdown/wikilinkResolverFs';
 
 /**
  * Cached snapshot of the Knowledge Base file tree, keyed by root path.
@@ -52,35 +56,21 @@ if (typeof window !== 'undefined') {
   window.addEventListener('mc:knowledge-tree-refresh', invalidateCache);
 }
 
-export type WikilinkAnchor =
-  | { kind: 'heading'; text: string }
-  | { kind: 'block'; id: string };
+// `parseWikilinkTarget` and `WikilinkAnchor` moved to the pure
+// `services/markdown/wikilinks.ts` module so the resolver can import them
+// without dragging the storage layer into Node-runnable test scripts.
+// We re-export here for backwards compatibility with existing call sites.
+import {
+  parseWikilinkTarget,
+  type WikilinkAnchor,
+} from '../../../../services/markdown/wikilinks';
+export { parseWikilinkTarget };
+export type { WikilinkAnchor };
 
 export type WikilinkResolution = {
   path: string;
   anchor: WikilinkAnchor | null;
 };
-
-/**
- * Split a wikilink target into a file part and an optional anchor. We
- * mirror Obsidian's syntax:
- *   `Note#Heading` → heading anchor
- *   `Note#^block-id` → block-id anchor
- */
-export function parseWikilinkTarget(target: string): {
-  file: string;
-  anchor: WikilinkAnchor | null;
-} {
-  const trimmed = target.trim();
-  const hash = trimmed.indexOf('#');
-  if (hash === -1) return { file: trimmed, anchor: null };
-  const file = trimmed.slice(0, hash);
-  const rest = trimmed.slice(hash + 1);
-  if (rest.startsWith('^')) {
-    return { file, anchor: { kind: 'block', id: rest.slice(1).trim() } };
-  }
-  return { file, anchor: { kind: 'heading', text: rest.trim() } };
-}
 
 /** Resolve a wikilink target to a KB-relative file path, if possible. */
 export function resolveKbWikilinkTarget(
@@ -234,21 +224,32 @@ export function wikilinkDecorations(getRoot: () => string) {
           if (!wikiTarget) return false;
           e.preventDefault();
           const root = getRoot();
-          const resolved = resolveKbWikilink(root, wikiTarget);
-          if (resolved) {
-            window.dispatchEvent(
-              new CustomEvent('mc:open-markdown-file', {
-                detail: { path: resolved.path, anchor: resolved.anchor },
-              }),
-            );
-          } else {
-            const { file } = parseWikilinkTarget(wikiTarget);
-            window.dispatchEvent(
-              new CustomEvent('mc:create-kb-note', {
-                detail: { name: file || wikiTarget },
-              }),
-            );
-          }
+          // Route through the frontmatter-aware resolver: Hypratia opens
+          // the matching node when one exists, falls back to the markdown
+          // file otherwise, and pops a chooser when titles collide. This
+          // is the click-flow that closes the Obsidian-coherent loop.
+          void resolveClickedWikilink(root, wikiTarget)
+            .then((resolution) => dispatchWikilinkResolution(resolution, wikiTarget))
+            .catch((err: unknown) => {
+              console.warn('[wikilink] resolve failed', err);
+              // Best-effort fallback: behave like the old code path so a
+              // resolver bug never traps the user on the page.
+              const resolved = resolveKbWikilink(root, wikiTarget);
+              if (resolved) {
+                window.dispatchEvent(
+                  new CustomEvent('mc:open-markdown-file', {
+                    detail: { path: resolved.path, anchor: resolved.anchor },
+                  }),
+                );
+              } else {
+                const { file } = parseWikilinkTarget(wikiTarget);
+                window.dispatchEvent(
+                  new CustomEvent('mc:create-kb-note', {
+                    detail: { name: file || wikiTarget },
+                  }),
+                );
+              }
+            });
           // Reference `view` to satisfy the unused-arg lint rule.
           void view;
           return true;

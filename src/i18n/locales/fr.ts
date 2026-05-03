@@ -127,6 +127,7 @@ const fr: Strings = {
     summary: '{{nodes}} notes, {{edges}} liens',
     ask: 'Demander',
     search: 'Rechercher',
+    searchWithLlm: 'Rechercher avec LLM',
     openMarkdown: 'Ouvrir Markdown',
     copyLinks: 'Copier les liens Markdown',
     addLinks: 'Ajouter un lien entre les notes sélectionnées',

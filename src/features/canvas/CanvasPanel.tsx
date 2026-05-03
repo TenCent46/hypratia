@@ -1,14 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Background,
   BaseEdge,
+  ConnectionMode,
+  MarkerType,
+  Position,
   ReactFlow,
+  ViewportPortal,
   useInternalNode,
   useReactFlow,
   type Connection,
+  type ConnectionLineComponentProps,
   type Edge as RfEdge,
   type EdgeChange,
+  type EdgeMarkerType,
   type EdgeProps,
   type EdgeTypes,
   type Node as RfNode,
@@ -37,6 +43,23 @@ import {
   type NodeContextMenuState,
 } from '../../components/NodeContextMenu/NodeContextMenu';
 import { CanvasPanelContextMenu } from '../../components/CanvasPanel/CanvasPanelContextMenu';
+import { EdgeToolbar } from '../../components/CanvasPanel/EdgeToolbar';
+import { ConnectionEndMenu } from '../../components/CanvasPanel/ConnectionEndMenu';
+import {
+  CapturePreview,
+  shouldOpenCapture,
+  type CaptureInput,
+} from '../../components/CapturePreview/CapturePreview';
+import { ImportChatgptPicker } from '../../components/CapturePreview/ImportChatgptPicker';
+import {
+  conversationToCaptureText,
+  parseChatgptExport,
+  type ImportedConversation,
+} from '../../services/capture/ChatgptImporter';
+import { writeCanvasFile } from '../../services/export/JsonCanvasExport';
+import { syncToVault } from '../../services/export/VaultSync';
+import { startMailboxWatcher } from '../../services/storage/MailboxWatcher';
+import { dialog } from '../../services/dialog';
 import type { PaneMenuControl } from '../../components/PanesContextMenu/PanesContextMenu';
 import {
   getCurrentMessageDragId,
@@ -60,10 +83,17 @@ import {
   selectNodesInRect,
   type Rect,
 } from '../../services/canvas/CanvasSelectionService';
+import { getHelperLines } from '../../services/canvas/HelperLines';
 import {
   ensureNodeMarkdownPath,
 } from '../../services/markdown/MarkdownContextResolver';
 import { searchMarkdownFiles, type MarkdownSearchResult, type MarkdownSearchScope } from '../../services/markdown/MarkdownSearchService';
+import {
+  searchNodesWithLlm,
+  type LlmSearchMatch,
+} from '../../services/llm/searchSelectedNodes';
+import { PROVIDERS, PROVIDER_ORDER } from '../../services/llm';
+import type { ModelRef, ProviderId } from '../../types';
 import { resolveMarkdownRoot } from '../../services/storage/MarkdownFileService';
 import { syncWikiLinkBetweenNodes } from '../../services/markdown/WikiLinkSyncService';
 import { buildCanvasAskContext } from '../../services/canvas/CanvasAskService';
@@ -83,27 +113,23 @@ const edgeTypes: EdgeTypes = {
 const MIN_CANVAS_ZOOM = 0.01;
 const MAX_CANVAS_ZOOM = 100;
 
+/**
+ * Read a CSS variable from the document root. Falls back when the variable
+ * is unset or we're running in a non-DOM env (e.g. tests). Used to color the
+ * React-Flow-managed `MarkerType.ArrowClosed` markers from the active theme.
+ */
+function readCssVar(name: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback;
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return v.length > 0 ? v : fallback;
+}
+
 function deriveTitle(content: string): string {
   const firstLine = content.split('\n')[0]?.trim() ?? '';
   return firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
 }
-
-function rectBoundaryPoint(
-  rect: { x: number; y: number; width: number; height: number },
-  toward: { x: number; y: number },
-) {
-  const cx = rect.x + rect.width / 2;
-  const cy = rect.y + rect.height / 2;
-  const dx = toward.x - cx;
-  const dy = toward.y - cy;
-  if (dx === 0 && dy === 0) return { x: cx, y: cy };
-  const scaleX = dx === 0 ? Number.POSITIVE_INFINITY : (rect.width / 2) / Math.abs(dx);
-  const scaleY = dy === 0 ? Number.POSITIVE_INFINITY : (rect.height / 2) / Math.abs(dy);
-  const scale = Math.min(scaleX, scaleY);
-  return { x: cx + dx * scale, y: cy + dy * scale };
-}
-
-const NODE_HEADER_OFFSET = 36;
 
 type EdgeRect = { x: number; y: number; width: number; height: number };
 
@@ -114,66 +140,246 @@ type SourceMarkerInfo = {
 };
 
 type FlexibleEdgeData = {
+  /**
+   * Persisted from the legacy "PDF text-selection → node" flow. The visual
+   * router no longer consumes this — every edge now lands on a side-midpoint
+   * for consistency — but the data is preserved so future tooling that wants
+   * to recover the source span can still find it.
+   */
   sourceMarker?: SourceMarkerInfo;
 };
 
-function markerAnchorPoint(
-  rect: EdgeRect,
-  toward: { x: number; y: number },
-  marker: SourceMarkerInfo,
-) {
-  const center = {
-    x: rect.x + rect.width / 2,
-    y: rect.y + rect.height / 2,
-  };
-  const onRight = toward.x >= center.x;
-  const x = onRight ? rect.x + rect.width : rect.x;
-  const safeLength = Math.max(1, marker.textLength);
-  const mid = (marker.startOffset + marker.endOffset) / 2;
-  const ratio = Math.max(0, Math.min(1, mid / safeLength));
-  const top = rect.y + Math.min(NODE_HEADER_OFFSET, rect.height * 0.25);
-  const bottom = rect.y + rect.height - 8;
-  const usableHeight = Math.max(0, bottom - top);
-  const y = top + ratio * usableHeight;
-  return { x, y, onRight };
+type Side = 'top' | 'right' | 'bottom' | 'left';
+
+type SidePoint = { x: number; y: number; side: Side };
+
+/**
+ * Pick the side of `rect` whose midpoint is closest to `toward`. Used for
+ * persisted edge endpoints — picks the side facing the other node.
+ */
+function nearestSideMidpoint(rect: EdgeRect, toward: { x: number; y: number }): SidePoint {
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+  const candidates: SidePoint[] = [
+    { x: cx, y: rect.y, side: 'top' },
+    { x: rect.x + rect.width, y: cy, side: 'right' },
+    { x: cx, y: rect.y + rect.height, side: 'bottom' },
+    { x: rect.x, y: cy, side: 'left' },
+  ];
+  let best = candidates[0];
+  let bestDist = Math.hypot(best.x - toward.x, best.y - toward.y);
+  for (let i = 1; i < candidates.length; i += 1) {
+    const c = candidates[i];
+    const d = Math.hypot(c.x - toward.x, c.y - toward.y);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return best;
 }
 
-function flexibleEdgePathFromRects(
-  sourceRect: EdgeRect,
-  targetRect: EdgeRect,
-  sourceMarker?: SourceMarkerInfo,
-) {
-  const sourceCenter = {
-    x: sourceRect.x + sourceRect.width / 2,
-    y: sourceRect.y + sourceRect.height / 2,
+/**
+ * For a cursor `inside` `rect`, return the midpoint of the boundary side the
+ * cursor is closest to. As the cursor moves around inside the rect, this
+ * gives a "the moment the cursor touches a side, the snap is that side"
+ * feel — which is the in-flight magnetic behavior the user asked for.
+ */
+function nearestSideMidpointFromInside(
+  rect: EdgeRect,
+  cursor: { x: number; y: number },
+): SidePoint {
+  const left = rect.x;
+  const right = rect.x + rect.width;
+  const top = rect.y;
+  const bottom = rect.y + rect.height;
+  const dTop = cursor.y - top;
+  const dRight = right - cursor.x;
+  const dBottom = bottom - cursor.y;
+  const dLeft = cursor.x - left;
+  const m = Math.min(dTop, dRight, dBottom, dLeft);
+  if (m === dTop) return { x: left + rect.width / 2, y: top, side: 'top' };
+  if (m === dRight) return { x: right, y: top + rect.height / 2, side: 'right' };
+  if (m === dBottom) return { x: left + rect.width / 2, y: bottom, side: 'bottom' };
+  return { x: left, y: top + rect.height / 2, side: 'left' };
+}
+
+/**
+ * Outward direction for a control point sitting on `side`. Used to make the
+ * Bezier curve exit/enter perpendicular to the rectangle.
+ */
+function controlOffset(side: Side, dist: number): { dx: number; dy: number } {
+  switch (side) {
+    case 'top':
+      return { dx: 0, dy: -dist };
+    case 'right':
+      return { dx: dist, dy: 0 };
+    case 'bottom':
+      return { dx: 0, dy: dist };
+    case 'left':
+      return { dx: -dist, dy: 0 };
+  }
+}
+
+/**
+ * Build a smooth cubic Bezier between two side-midpoints. The control points
+ * push outward perpendicular to each side so the curve always exits one
+ * rectangle perpendicular and enters the other perpendicular — this is the
+ * Obsidian-Canvas-like read.
+ */
+function sideMidpointBezierPath(start: SidePoint, end: SidePoint): string {
+  const dist = Math.hypot(end.x - start.x, end.y - start.y);
+  const offset = Math.max(40, dist * 0.35);
+  const c1 = controlOffset(start.side, offset);
+  const c2 = controlOffset(end.side, offset);
+  return `M ${start.x},${start.y} C ${start.x + c1.dx},${start.y + c1.dy} ${
+    end.x + c2.dx
+  },${end.y + c2.dy} ${end.x},${end.y}`;
+}
+
+function positionToSide(p: Position): Side {
+  if (p === Position.Top) return 'top';
+  if (p === Position.Right) return 'right';
+  if (p === Position.Bottom) return 'bottom';
+  return 'left';
+}
+
+/**
+ * Position the visible edge grip slightly outside the node boundary along
+ * the curve's outward direction, so the dot sits ON the edge (not inside
+ * the node). 14 flow-units feels right at default zoom.
+ */
+function gripPosFromSide(p: SidePoint, dist = 14): { x: number; y: number } {
+  switch (p.side) {
+    case 'top':
+      return { x: p.x, y: p.y - dist };
+    case 'right':
+      return { x: p.x + dist, y: p.y };
+    case 'bottom':
+      return { x: p.x, y: p.y + dist };
+    case 'left':
+      return { x: p.x - dist, y: p.y };
+  }
+}
+
+type EdgeDetachState = {
+  edgeId: string;
+  /** Which endpoint stays anchored to its node — the OTHER endpoint follows the cursor. */
+  anchoredEnd: 'source' | 'target';
+  /** Anchored side midpoint in flow coordinates (updates as cursor moves so the
+   *  curve always exits the closest face of the anchor node). */
+  anchor: SidePoint;
+  /** Cursor position in flow coordinates. */
+  cursor: { x: number; y: number };
+};
+
+/**
+ * Provided by CanvasPanel; consumed by FlexibleEdge so each edge knows when
+ * it is the one being detached and can swap to in-flight rendering. Null
+ * while no detach is active — the common case.
+ */
+const EdgeDetachContext = createContext<EdgeDetachState | null>(null);
+
+const EDGE_DETACH_EVENT = 'mc:edge-detach-begin';
+
+type EdgeDetachBeginDetail = {
+  edgeId: string;
+  /** Which side the user grabbed (source = start of edge / target = end). */
+  grabbedEnd: 'source' | 'target';
+  startScreen: { x: number; y: number };
+};
+
+/**
+ * In-flight connection line. While the user drags from a handle, this draws
+ * the candidate path to the cursor. The moment the cursor enters another
+ * node's bounding rectangle, the line snaps to the **midpoint of the
+ * boundary side the cursor is currently closest to** — not the node's
+ * geometric center. Routing matches `FlexibleEdge` so the in-flight visual
+ * is continuous with the persisted edge once the connection is dropped.
+ */
+function HypConnectionLine(props: ConnectionLineComponentProps) {
+  const { fromX, fromY, toX, toY, fromPosition, fromNode } = props;
+  const flow = useReactFlow();
+  const fromSide = positionToSide(fromPosition);
+
+  let end: SidePoint | { x: number; y: number; side?: undefined } = {
+    x: toX,
+    y: toY,
   };
-  const targetCenter = {
-    x: targetRect.x + targetRect.width / 2,
-    y: targetRect.y + targetRect.height / 2,
-  };
-  const start = sourceMarker
-    ? markerAnchorPoint(sourceRect, targetCenter, sourceMarker)
-    : {
-        ...rectBoundaryPoint(sourceRect, targetCenter),
-        onRight: targetCenter.x >= sourceCenter.x,
-      };
-  const end = rectBoundaryPoint(targetRect, sourceCenter);
-  const horizontal = Math.abs(end.x - start.x);
-  const dxBase = Math.max(40, horizontal * 0.35);
-  const dx = sourceMarker
-    ? start.onRight
-      ? dxBase
-      : -dxBase
-    : end.x >= start.x
-    ? dxBase
-    : -dxBase;
-  return `M ${start.x},${start.y} C ${start.x + dx},${start.y} ${end.x - dx},${end.y} ${end.x},${end.y}`;
+  for (const n of flow.getNodes()) {
+    if (fromNode && n.id === fromNode.id) continue;
+    const w = n.measured?.width ?? n.width ?? 0;
+    const h = n.measured?.height ?? n.height ?? 0;
+    if (!w || !h) continue;
+    const left = n.position.x;
+    const right = left + w;
+    const top = n.position.y;
+    const bottom = top + h;
+    if (toX >= left && toX <= right && toY >= top && toY <= bottom) {
+      end = nearestSideMidpointFromInside(
+        { x: left, y: top, width: w, height: h },
+        { x: toX, y: toY },
+      );
+      break;
+    }
+  }
+
+  let path: string;
+  if (end.side) {
+    path = sideMidpointBezierPath(
+      { x: fromX, y: fromY, side: fromSide },
+      end,
+    );
+  } else {
+    // Cursor in empty space — exit the source perpendicular to its side and
+    // approach the cursor along the source→cursor vector so the curve doesn't
+    // kink near the cursor.
+    const dist = Math.hypot(end.x - fromX, end.y - fromY);
+    const offset = Math.max(40, dist * 0.35);
+    const c1Off = controlOffset(fromSide, offset);
+    const c1 = { x: fromX + c1Off.dx, y: fromY + c1Off.dy };
+    const len = Math.max(1, dist);
+    const dx = (end.x - fromX) / len;
+    const dy = (end.y - fromY) / len;
+    const c2 = { x: end.x - dx * offset, y: end.y - dy * offset };
+    path = `M ${fromX},${fromY} C ${c1.x},${c1.y} ${c2.x},${c2.y} ${end.x},${end.y}`;
+  }
+
+  return (
+    <g>
+      <path d={path} className="hyp-connection-line" />
+    </g>
+  );
+}
+
+/**
+ * Smooth bezier from an anchored side midpoint to a free cursor in flow
+ * coordinates. Used while the user is detaching an edge endpoint — the
+ * anchored end keeps its perpendicular tangent, the cursor end is
+ * approached along the source→cursor vector.
+ */
+function detachInFlightPath(
+  anchor: SidePoint,
+  cursor: { x: number; y: number },
+): string {
+  const dx = cursor.x - anchor.x;
+  const dy = cursor.y - anchor.y;
+  const dist = Math.hypot(dx, dy);
+  const offset = Math.max(40, dist * 0.35);
+  const c1Off = controlOffset(anchor.side, offset);
+  const c1 = { x: anchor.x + c1Off.dx, y: anchor.y + c1Off.dy };
+  const len = Math.max(1, dist);
+  const ux = dx / len;
+  const uy = dy / len;
+  const c2 = { x: cursor.x - ux * offset, y: cursor.y - uy * offset };
+  return `M ${anchor.x},${anchor.y} C ${c1.x},${c1.y} ${c2.x},${c2.y} ${cursor.x},${cursor.y}`;
 }
 
 function FlexibleEdge(props: EdgeProps<RfEdge<FlexibleEdgeData>>) {
   const sourceNode = useInternalNode(props.source);
   const targetNode = useInternalNode(props.target);
-  const sourceMarker = props.data?.sourceMarker;
+  const detach = useContext(EdgeDetachContext);
+  const isDetaching = detach?.edgeId === props.id;
 
   const fallbackPath = `M ${props.sourceX},${props.sourceY} C ${
     props.sourceX + 40
@@ -182,6 +388,9 @@ function FlexibleEdge(props: EdgeProps<RfEdge<FlexibleEdgeData>>) {
   }`;
 
   let path = fallbackPath;
+  let startSide: SidePoint | null = null;
+  let endSide: SidePoint | null = null;
+
   if (sourceNode && targetNode) {
     const sourcePos =
       sourceNode.internals.positionAbsolute ?? sourceNode.position;
@@ -209,22 +418,86 @@ function FlexibleEdge(props: EdgeProps<RfEdge<FlexibleEdgeData>>) {
         width: targetWidth,
         height: targetHeight,
       };
-      path = flexibleEdgePathFromRects(sourceRect, targetRect, sourceMarker);
-    } else {
-      // measured not available yet — keep fallback this frame; a re-render
-      // will follow once React Flow finishes measuring.
-      path = fallbackPath;
+      const sourceCenter = {
+        x: sourceRect.x + sourceRect.width / 2,
+        y: sourceRect.y + sourceRect.height / 2,
+      };
+      const targetCenter = {
+        x: targetRect.x + targetRect.width / 2,
+        y: targetRect.y + targetRect.height / 2,
+      };
+      startSide = nearestSideMidpoint(sourceRect, targetCenter);
+      endSide = nearestSideMidpoint(targetRect, sourceCenter);
+      path = sideMidpointBezierPath(startSide, endSide);
     }
   }
 
+  // While this edge is being detached, swap the rendered path so the moving
+  // endpoint follows the cursor. Hide the grip handles too — the user is
+  // already holding one.
+  if (isDetaching && detach) {
+    const inFlight = detachInFlightPath(detach.anchor, detach.cursor);
+    return (
+      <BaseEdge
+        path={inFlight}
+        style={{
+          stroke: 'var(--accent)',
+          strokeWidth: 2.25,
+          strokeDasharray: '4 4',
+          opacity: 0.9,
+          ...(props.style as Record<string, unknown>),
+        }}
+        interactionWidth={0}
+      />
+    );
+  }
+
+  function dispatchGrip(grabbedEnd: 'source' | 'target') {
+    return (e: PointerEvent<SVGCircleElement>) => {
+      // Stop React Flow's edge-select / pane-marquee handlers from also
+      // firing — the grip is a pure detach gesture.
+      e.stopPropagation();
+      e.preventDefault();
+      const detail: EdgeDetachBeginDetail = {
+        edgeId: props.id,
+        grabbedEnd,
+        startScreen: { x: e.clientX, y: e.clientY },
+      };
+      window.dispatchEvent(new CustomEvent(EDGE_DETACH_EVENT, { detail }));
+    };
+  }
+
   return (
-    <BaseEdge
-      path={path}
-      markerEnd={props.markerEnd}
-      style={props.style}
-      interactionWidth={props.interactionWidth}
-    />
+    <>
+      <BaseEdge
+        path={path}
+        markerEnd={props.markerEnd}
+        style={props.style}
+        interactionWidth={props.interactionWidth}
+      />
+      {startSide ? (
+        <circle
+          className="hyp-edge-grip"
+          {...gripCxCy(startSide)}
+          r={9}
+          onPointerDown={dispatchGrip('source')}
+        />
+      ) : null}
+      {endSide ? (
+        <circle
+          className="hyp-edge-grip"
+          {...gripCxCy(endSide)}
+          r={9}
+          onPointerDown={dispatchGrip('target')}
+        />
+      ) : null}
+    </>
   );
+}
+
+function gripCxCy(side: SidePoint): { cx: number; cy: number } {
+  const p = gripPosFromSide(side);
+  return { cx: p.x, cy: p.y };
 }
 
 export type CanvasPanelProps = {
@@ -288,6 +561,39 @@ export function CanvasPanel({
   const [dragOver, setDragOver] = useState(false);
   const [dropTargetNodeId, setDropTargetNodeId] = useState<string | null>(null);
   const [dupToast, setDupToast] = useState<{ id: number } | null>(null);
+  // Edge ids created during this session that should run the draw-in
+  // animation. Cleared per id ~350 ms after creation.
+  const [justCreatedEdgeIds, setJustCreatedEdgeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  // Active connection in flight (between onConnectStart and onConnectEnd).
+  // Used to highlight the candidate target node when the cursor is within
+  // the magnetic radius.
+  const [connectingFromNodeId, setConnectingFromNodeId] = useState<string | null>(
+    null,
+  );
+  const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(
+    null,
+  );
+  const [helperLines, setHelperLines] = useState<{
+    vertical?: number;
+    horizontal?: number;
+  } | null>(null);
+  const [captureInput, setCaptureInput] = useState<CaptureInput | null>(null);
+  const [importPicker, setImportPicker] = useState<{
+    conversations: ImportedConversation[];
+    landAt: { x: number; y: number };
+  } | null>(null);
+  /** Open menu when the user releases a connection on empty canvas. */
+  const [connectionEndMenu, setConnectionEndMenu] = useState<{
+    sourceNodeId: string;
+    screen: { x: number; y: number };
+    flowPos: { x: number; y: number };
+  } | null>(null);
+  /** Custom edge detach state. Replaces React Flow's built-in reconnect
+   *  because that one positions its grips at React Flow's `sourceX/Y`,
+   *  which mismatches our side-midpoint custom path. */
+  const [edgeDetach, setEdgeDetach] = useState<EdgeDetachState | null>(null);
   const suppressDupWarning = useStore(
     (s) => s.settings.suppressDuplicateChatNodeWarning ?? false,
   );
@@ -306,6 +612,7 @@ export function CanvasPanel({
     endOffset: number;
   } | null>(null);
   const [searchOpen, setSearchOpen] = useState<{ nodeIds: string[]; initialQuery?: string } | null>(null);
+  const [llmSearchOpen, setLlmSearchOpen] = useState<{ nodeIds: string[] } | null>(null);
   const [marquee, setMarquee] = useState<{
     startScreen: { x: number; y: number };
     currentScreen: { x: number; y: number };
@@ -472,6 +779,25 @@ export function CanvasPanel({
           baseStyle.stroke = 'var(--accent)';
           baseStyle.strokeWidth = 2.5;
         }
+        const classes: string[] = [];
+        if (e.kind) classes.push(`edge-kind-${e.kind}`);
+        if (justCreatedEdgeIds.has(e.id)) classes.push('edge-just-created');
+        // React Flow's built-in marker (`MarkerType.ArrowClosed`) is injected
+        // into React Flow's own SVG `<defs>`, so the `url(#…)` reference is
+        // always in the same SVG document — that's the only reliable way to
+        // get markers to render across themes / browsers (Tauri's WebKit was
+        // dropping cross-SVG references silently). Color literals are
+        // resolved from CSS vars at render time.
+        const markerEnd: EdgeMarkerType = {
+          type: MarkerType.ArrowClosed,
+          color: isSelected
+            ? readCssVar('--accent', '#3b82f6')
+            : e.kind === 'related'
+            ? readCssVar('--text-mute', '#9c9c9c')
+            : readCssVar('--text-mute', '#7c7c7c'),
+          width: 22,
+          height: 22,
+        };
         return {
           id: e.id,
           source: e.sourceNodeId,
@@ -481,13 +807,14 @@ export function CanvasPanel({
           label: e.label,
           selected: isSelected,
           style: Object.keys(baseStyle).length > 0 ? baseStyle : undefined,
-          className: e.kind ? `edge-kind-${e.kind}` : undefined,
+          className: classes.length > 0 ? classes.join(' ') : undefined,
+          markerEnd,
           // Widen the invisible hit-target stroke so right-click reliably
           // lands on the curved path (default 20px is narrow at low zoom).
           interactionWidth: 28,
         };
       });
-  }, [storeEdges, storeNodes, rfNodes, selectedEdgeIds]);
+  }, [storeEdges, storeNodes, rfNodes, selectedEdgeIds, justCreatedEdgeIds]);
 
   const initialViewport: RfViewport | undefined =
     !showGlobal && conversationId
@@ -495,6 +822,44 @@ export function CanvasPanel({
       : undefined;
 
   function onNodesChange(changes: NodeChange[]) {
+    // Compute alignment guides + soft snap (~6 px) for the *primary* dragged
+    // node. Multi-select drags produce one position-change per node — we use
+    // the first dragging change as the snap reference and apply the same
+    // delta to every other dragged node so the group stays rigid.
+    let snapDeltaX = 0;
+    let snapDeltaY = 0;
+    let computedGuides: { vertical?: number; horizontal?: number } | null = null;
+    let anyDragging = false;
+    for (const ch of changes) {
+      if (ch.type === 'position' && ch.position && ch.dragging) {
+        if (!computedGuides) {
+          const lines = getHelperLines(ch, rfNodes);
+          if (lines.snapPosition.x !== undefined) {
+            snapDeltaX = lines.snapPosition.x - ch.position.x;
+            ch.position.x = lines.snapPosition.x;
+          }
+          if (lines.snapPosition.y !== undefined) {
+            snapDeltaY = lines.snapPosition.y - ch.position.y;
+            ch.position.y = lines.snapPosition.y;
+          }
+          computedGuides = {
+            vertical: lines.vertical,
+            horizontal: lines.horizontal,
+          };
+        } else {
+          // Apply the leader's snap correction to every other dragged node.
+          if (snapDeltaX) ch.position.x += snapDeltaX;
+          if (snapDeltaY) ch.position.y += snapDeltaY;
+        }
+        anyDragging = true;
+      }
+    }
+    if (anyDragging) {
+      setHelperLines(computedGuides);
+    } else if (helperLines) {
+      setHelperLines(null);
+    }
+
     for (const ch of changes) {
       if (ch.type === 'position' && ch.position) {
         updateNodePosition(ch.id, ch.position);
@@ -521,8 +886,34 @@ export function CanvasPanel({
     for (const ch of changes) {
       if (ch.type === 'remove') {
         removeEdge(ch.id);
+      } else if (ch.type === 'select') {
+        // Mirror React Flow's internal selection into our store. Without
+        // this, box-select / programmatic-select / Delete-after-click never
+        // reach our `selectedEdgeIds`, and the EdgeToolbar (which gates on
+        // store selection) never appears.
+        const next = ch.selected
+          ? Array.from(new Set([...selectedEdgeIds, ch.id]))
+          : selectedEdgeIds.filter((id) => id !== ch.id);
+        setCanvasSelection(selectedNodeIds, next);
       }
     }
+  }
+
+  function markEdgeJustCreated(edgeId: string) {
+    setJustCreatedEdgeIds((prev) => {
+      if (prev.has(edgeId)) return prev;
+      const next = new Set(prev);
+      next.add(edgeId);
+      return next;
+    });
+    window.setTimeout(() => {
+      setJustCreatedEdgeIds((prev) => {
+        if (!prev.has(edgeId)) return prev;
+        const next = new Set(prev);
+        next.delete(edgeId);
+        return next;
+      });
+    }, 350);
   }
 
   function onConnect(c: Connection) {
@@ -539,11 +930,144 @@ export function CanvasPanel({
       targetNodeId: c.target,
       ...(isThemeLink ? { kind: 'related' as const } : {}),
     });
+    markEdgeJustCreated(edge.id);
     void syncConnectedMarkdownLinks(c.source, c.target);
     setCanvasSelection(
       [c.source, c.target],
       Array.from(new Set([...selectedEdgeIds, edge.id])),
     );
+  }
+
+  /**
+   * Validate an in-flight connection. Reject self-loops and duplicate edges
+   * so users do not accumulate redundant arrows by accident. Runs for every
+   * pointermove inside `connectionRadius`, so keep it cheap.
+   */
+  function isValidConnection(c: Connection | RfEdge): boolean {
+    const source = 'source' in c ? c.source : null;
+    const target = 'target' in c ? c.target : null;
+    if (!source || !target || source === target) return false;
+    const exists = storeEdges.some(
+      (e) =>
+        (e.sourceNodeId === source && e.targetNodeId === target) ||
+        (e.sourceNodeId === target && e.targetNodeId === source),
+    );
+    return !exists;
+  }
+
+  function onConnectStart(_e: unknown, params: { nodeId?: string | null }) {
+    setConnectingFromNodeId(params.nodeId ?? null);
+  }
+
+  function onConnectEnd(event: MouseEvent | TouchEvent | unknown) {
+    // If the connection ended on empty canvas (the user did NOT drop on a
+    // node), offer "Add card" / "Add note from vault" at the cursor. We
+    // detect "empty" by inspecting the pointer's terminal element via the
+    // event React Flow forwards. `react-flow__pane` is the background.
+    let landed: 'pane' | 'node' | 'unknown' = 'unknown';
+    let screenX = 0;
+    let screenY = 0;
+    const startedFrom = connectingFromNodeId;
+    if (event && typeof event === 'object') {
+      const e = event as MouseEvent | TouchEvent;
+      const target = (e as MouseEvent).target as HTMLElement | null;
+      if (target) {
+        if (target.closest('.react-flow__node')) landed = 'node';
+        else if (target.closest('.react-flow__pane')) landed = 'pane';
+      }
+      const me = e as MouseEvent;
+      const te = e as TouchEvent;
+      if ('clientX' in me && typeof me.clientX === 'number') {
+        screenX = me.clientX;
+        screenY = me.clientY;
+      } else if (te.changedTouches && te.changedTouches[0]) {
+        screenX = te.changedTouches[0].clientX;
+        screenY = te.changedTouches[0].clientY;
+      }
+    }
+    setConnectingFromNodeId(null);
+    setConnectionTargetNodeId(null);
+    if (landed === 'pane' && startedFrom && screenX > 0) {
+      const flowPos = flow.screenToFlowPosition({ x: screenX, y: screenY });
+      setConnectionEndMenu({
+        sourceNodeId: startedFrom,
+        screen: { x: screenX, y: screenY },
+        flowPos,
+      });
+    }
+  }
+
+  /**
+   * "Add card" — create a fresh, empty Markdown node at the release point and
+   * connect it from the source. The node spawns in edit mode so the user can
+   * type immediately (matches the right-click → Add Node flow).
+   */
+  function addCardFromConnection(menu: NonNullable<typeof connectionEndMenu>) {
+    if (!conversationId) return;
+    const created = addNode({
+      conversationId,
+      kind: 'markdown',
+      title: '',
+      contentMarkdown: '',
+      position: {
+        x: menu.flowPos.x - 140,
+        y: menu.flowPos.y - 60,
+      },
+      width: 280,
+      height: 140,
+      tags: [],
+    });
+    const edge = addEdge({
+      sourceNodeId: menu.sourceNodeId,
+      targetNodeId: created.id,
+    });
+    markEdgeJustCreated(edge.id);
+    setEditingNode(created.id);
+    setCanvasSelection([created.id], [edge.id]);
+  }
+
+  /**
+   * "Add note from vault" — pick a Markdown file via the native dialog, read
+   * its contents, and create a Markdown node connected from the source. The
+   * node title is the filename (sans extension); body is the file content.
+   */
+  async function addVaultNoteFromConnection(
+    menu: NonNullable<typeof connectionEndMenu>,
+  ) {
+    if (!conversationId) return;
+    const path = await dialog.pickFile({
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
+    });
+    if (!path) return;
+    let content: string;
+    try {
+      content = await dialog.readTextFile(path);
+    } catch (err) {
+      console.error('[connection-end] read failed', err);
+      return;
+    }
+    const filename = path.split(/[\\/]/).pop() ?? 'note.md';
+    const title = filename.replace(/\.[^.]+$/, '');
+    const created = addNode({
+      conversationId,
+      kind: 'markdown',
+      title,
+      contentMarkdown: content,
+      position: {
+        x: menu.flowPos.x - 140,
+        y: menu.flowPos.y - 60,
+      },
+      width: 320,
+      height: 200,
+      tags: ['from-vault'],
+      mdPath: path,
+    });
+    const edge = addEdge({
+      sourceNodeId: menu.sourceNodeId,
+      targetNodeId: created.id,
+    });
+    markEdgeJustCreated(edge.id);
+    setCanvasSelection([created.id], [edge.id]);
   }
 
   async function syncConnectedMarkdownLinks(sourceId: string, targetId: string) {
@@ -565,6 +1089,74 @@ export function CanvasPanel({
 
   function onMoveEnd(_: unknown, viewport: RfViewport) {
     if (!showGlobal && conversationId) setViewport(conversationId, viewport);
+  }
+
+  /**
+   * Plan 52 — sync every conversation Hypratia owns into the vault under
+   * `Hypratia/`. One-way: never writes outside that subtree, never modifies
+   * user-owned files. Idempotent for canvases / sidecars Hypratia owns.
+   */
+  async function syncEverythingToVault() {
+    const state = useStore.getState();
+    let vaultPath = state.settings.obsidianVaultPath;
+    if (!vaultPath) {
+      const picked = await dialog.pickFolder();
+      if (!picked) return;
+      vaultPath = picked;
+      state.setObsidianVault(picked);
+    }
+    try {
+      const summary = await syncToVault({
+        vaultPath,
+        conversations: state.conversations,
+        nodes: state.nodes,
+        edges: state.edges,
+      });
+      console.info(
+        `[vault-sync] synced ${summary.canvases} canvas(es), ${summary.notes} note(s) to ${summary.vaultPath}/Hypratia`,
+      );
+    } catch (err) {
+      console.error('[vault-sync] failed', err);
+    }
+  }
+
+  /**
+   * Plan 48 — write the current conversation's canvas as a `.canvas` file
+   * (plus long-body sidecar `.md` notes) into the user's Obsidian vault.
+   * Uses the configured vault if set; otherwise prompts for a folder once.
+   */
+  async function exportObsidianCanvas() {
+    if (!conversationId) return;
+    const state = useStore.getState();
+    let vaultPath = state.settings.obsidianVaultPath;
+    if (!vaultPath) {
+      const picked = await dialog.pickFolder();
+      if (!picked) return;
+      vaultPath = picked;
+      // Persist so subsequent exports are one-click.
+      state.setObsidianVault(picked);
+    }
+    const conv = state.conversations.find((c) => c.id === conversationId);
+    const title = conv?.title ?? 'Untitled';
+    const nodesForCanvas = state.nodes.filter(
+      (n) => n.conversationId === conversationId,
+    );
+    const nodeIdSet = new Set(nodesForCanvas.map((n) => n.id));
+    const edgesForCanvas = state.edges.filter(
+      (e) => nodeIdSet.has(e.sourceNodeId) && nodeIdSet.has(e.targetNodeId),
+    );
+    try {
+      const result = await writeCanvasFile({
+        vaultPath,
+        conversationId,
+        conversationTitle: title,
+        nodes: nodesForCanvas,
+        edges: edgesForCanvas,
+      });
+      console.info('[obsidian-canvas] exported', result.canvasPath, '+', result.sidecarPaths.length, 'notes');
+    } catch (err) {
+      console.error('[obsidian-canvas] export failed', err);
+    }
   }
 
   function onPaneClick() {
@@ -1041,8 +1633,27 @@ export function CanvasPanel({
 
     if (e.dataTransfer.files.length > 0 && targetConv) {
       e.preventDefault();
+      const files = Array.from(e.dataTransfer.files);
+      // Plan 43 — if a `conversations.json` (or any `.json` looking like the
+      // OpenAI export shape) is dropped, route it into the import picker
+      // instead of attaching it as a file.
+      const jsonFile = files.find(
+        (f) => f.type === 'application/json' || f.name.toLowerCase().endsWith('.json'),
+      );
+      if (jsonFile && files.length === 1) {
+        try {
+          const text = await jsonFile.text();
+          const convos = parseChatgptExport(text);
+          if (convos.length > 0) {
+            setImportPicker({ conversations: convos, landAt: position });
+            return;
+          }
+        } catch (err) {
+          console.warn('[chatgpt-import] failed to parse JSON, falling back to attachment', err);
+        }
+      }
       const ingested = await ingestDroppedFiles(
-        Array.from(e.dataTransfer.files),
+        files,
         targetConv,
         position,
       );
@@ -1187,17 +1798,56 @@ export function CanvasPanel({
     setDupToast({ id: Date.now() });
   }
 
+  // React Flow's stored `position` is the node's top-left corner, not its
+  // center. Pass position straight to setCenter and the corner lands at the
+  // viewport center — the node renders off to the bottom-right. Shift by
+  // the rendered half-size so the node body actually sits in the middle.
+  function focusOnNodeCenter(
+    nodeId: string,
+    opts?: { zoom?: number; duration?: number },
+  ) {
+    const node = useStore.getState().nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const rfNode = flow.getNode(nodeId);
+    const w = rfNode?.measured?.width ?? rfNode?.width ?? 0;
+    const h = rfNode?.measured?.height ?? rfNode?.height ?? 0;
+    const cx = node.position.x + w / 2;
+    const cy = node.position.y + h / 2;
+    flow.setCenter(cx, cy, {
+      zoom: opts?.zoom ?? 1.1,
+      duration: opts?.duration ?? 220,
+    });
+  }
+
   useEffect(() => {
     function onFocusCanvasNode(e: Event) {
       const nodeId = (e as CustomEvent<{ nodeId?: string }>).detail?.nodeId;
       if (!nodeId) return;
-      const node = useStore.getState().nodes.find((n) => n.id === nodeId);
-      if (!node) return;
-      flow.setCenter(node.position.x, node.position.y, { zoom: 1.1, duration: 300 });
+      // 220 ms reads as snappy; the previous 300 ms felt floaty in side-by-side
+      // panes (plan 39 — motion polish).
+      focusOnNodeCenter(nodeId, { zoom: 0.77, duration: 220 });
     }
     window.addEventListener('mc:focus-canvas-node', onFocusCanvasNode);
     return () => window.removeEventListener('mc:focus-canvas-node', onFocusCanvasNode);
+    // focusOnNodeCenter closes over `flow`, which is stable per provider —
+    // re-binding the listener every render would be wasteful.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow]);
+
+  // Connection-target highlight: while a connection is being dragged from a
+  // node, mark the candidate target's React Flow wrapper with a CSS class so
+  // it shows the magnetic outline. Avoids a full re-render of every node.
+  useEffect(() => {
+    if (!connectionTargetNodeId) return;
+    const el = document.querySelector(
+      `.react-flow__node[data-id="${CSS.escape(connectionTargetNodeId)}"]`,
+    );
+    if (!el) return;
+    el.classList.add('connection-target');
+    return () => {
+      el.classList.remove('connection-target');
+    };
+  }, [connectionTargetNodeId]);
 
   // Cmd/Ctrl+A on a hovered or single-selected markdown node → text-select
   // that node's body only (instead of the browser default of selecting
@@ -1271,12 +1921,232 @@ export function CanvasPanel({
       const screenX = rect.left + rect.width / 2;
       const screenY = rect.top + rect.height / 2;
       const position = flow.screenToFlowPosition({ x: screenX, y: screenY });
+      // Plan 41 — when the clipboard text looks like an AI conversation,
+      // route it through Capture Preview instead of dropping a single memo.
+      // ⌘⇧V (handled below) always opens the preview.
+      const text = data.getData('text/plain');
+      const hasFiles = Array.from(data.items).some((it) => it.kind === 'file');
+      if (!hasFiles && text && shouldOpenCapture(text)) {
+        e.preventDefault();
+        setCaptureInput({
+          source: 'paste',
+          rawText: text,
+          conversationId,
+          landAt: position,
+        });
+        return;
+      }
       e.preventDefault();
       void pasteToCanvas({ kind: 'event', data }, conversationId, position);
     }
     document.addEventListener('paste', onDocPaste);
     return () => document.removeEventListener('paste', onDocPaste);
   }, [conversationId, showGlobal, flow]);
+
+  // ⌘⇧V — always open Capture Preview from the current clipboard text. Useful
+  // when the heuristic in onDocPaste is too conservative for an unusual share
+  // format. We bypass the regular paste-event path entirely here.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!e.shiftKey) return;
+      if (e.key !== 'v' && e.key !== 'V') return;
+      const active = document.activeElement as HTMLElement | null;
+      if (
+        active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.isContentEditable)
+      ) {
+        return;
+      }
+      if (showGlobal || !conversationId) return;
+      e.preventDefault();
+      void navigator.clipboard
+        .readText()
+        .then((text) => {
+          if (!text || !text.trim()) return;
+          const container = document.querySelector('.react-flow') as HTMLElement | null;
+          if (!container) return;
+          const r = container.getBoundingClientRect();
+          const position = flow.screenToFlowPosition({
+            x: r.left + r.width / 2,
+            y: r.top + r.height / 2,
+          });
+          setCaptureInput({
+            source: 'paste',
+            rawText: text,
+            conversationId,
+            landAt: position,
+          });
+        })
+        .catch(() => {
+          /* clipboard permission denied — silently no-op */
+        });
+    }
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [conversationId, showGlobal, flow]);
+
+  // Custom edge-endpoint detach. Listens for the `mc:edge-detach-begin`
+  // CustomEvent dispatched by FlexibleEdge grips, then attaches window-level
+  // pointer listeners to drive the in-flight visual and resolve the drop.
+  // Drop on a different node → reconnect. Drop on empty pane → delete.
+  useEffect(() => {
+    function onBegin(e: Event) {
+      const detail = (e as CustomEvent<EdgeDetachBeginDetail>).detail;
+      if (!detail) return;
+      const state = useStore.getState();
+      const edge = state.edges.find((ed) => ed.id === detail.edgeId);
+      if (!edge) return;
+      // The user grabbed `grabbedEnd`; the OTHER end is the anchor.
+      const anchoredEnd =
+        detail.grabbedEnd === 'source' ? 'target' : 'source';
+      const anchorNodeId =
+        anchoredEnd === 'source' ? edge.sourceNodeId : edge.targetNodeId;
+      const anchorNode = state.nodes.find((n) => n.id === anchorNodeId);
+      if (!anchorNode) return;
+      const w = anchorNode.width ?? 280;
+      const h = anchorNode.height ?? 160;
+      const rect: EdgeRect = {
+        x: anchorNode.position.x,
+        y: anchorNode.position.y,
+        width: w,
+        height: h,
+      };
+      const cursor = flow.screenToFlowPosition(detail.startScreen);
+      const anchor = nearestSideMidpoint(rect, cursor);
+      setEdgeDetach({
+        edgeId: detail.edgeId,
+        anchoredEnd,
+        anchor,
+        cursor,
+      });
+      document.body.dataset.edgeDetach = 'true';
+    }
+    window.addEventListener(EDGE_DETACH_EVENT, onBegin);
+    return () => {
+      window.removeEventListener(EDGE_DETACH_EVENT, onBegin);
+    };
+  }, [flow]);
+
+  useEffect(() => {
+    if (!edgeDetach) return;
+    function onMove(e: globalThis.PointerEvent) {
+      const cursor = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      setEdgeDetach((prev) => {
+        if (!prev) return prev;
+        const state = useStore.getState();
+        const edge = state.edges.find((ed) => ed.id === prev.edgeId);
+        if (!edge) return prev;
+        const anchorNodeId =
+          prev.anchoredEnd === 'source' ? edge.sourceNodeId : edge.targetNodeId;
+        const anchorNode = state.nodes.find((n) => n.id === anchorNodeId);
+        if (!anchorNode) return prev;
+        const w = anchorNode.width ?? 280;
+        const h = anchorNode.height ?? 160;
+        const rect: EdgeRect = {
+          x: anchorNode.position.x,
+          y: anchorNode.position.y,
+          width: w,
+          height: h,
+        };
+        const anchor = nearestSideMidpoint(rect, cursor);
+        return { ...prev, anchor, cursor };
+      });
+    }
+    function onUp(e: globalThis.PointerEvent) {
+      const detach = edgeDetach;
+      setEdgeDetach(null);
+      delete document.body.dataset.edgeDetach;
+      if (!detach) return;
+      const state = useStore.getState();
+      const edge = state.edges.find((ed) => ed.id === detach.edgeId);
+      if (!edge) return;
+      const anchorNodeId =
+        detach.anchoredEnd === 'source' ? edge.sourceNodeId : edge.targetNodeId;
+      const originalOtherId =
+        detach.anchoredEnd === 'source' ? edge.targetNodeId : edge.sourceNodeId;
+      // Hit-test for a node under the cursor on release.
+      let landedNodeId: string | null = null;
+      const target = e.target as HTMLElement | null;
+      const nodeEl = target?.closest('.react-flow__node');
+      if (nodeEl) {
+        landedNodeId = (nodeEl as HTMLElement).getAttribute('data-id');
+      }
+      if (!landedNodeId || landedNodeId === anchorNodeId) {
+        // Empty canvas drop OR self-loop → delete (⌘Z restores via undo stack).
+        removeEdge(detach.edgeId);
+        return;
+      }
+      if (landedNodeId === originalOtherId) {
+        // Released on the same node — no-op.
+        return;
+      }
+      // Reconnect to a different node.
+      removeEdge(detach.edgeId);
+      const newEdge = state.addEdge({
+        sourceNodeId:
+          detach.anchoredEnd === 'source' ? anchorNodeId : landedNodeId,
+        targetNodeId:
+          detach.anchoredEnd === 'source' ? landedNodeId : anchorNodeId,
+        ...(edge.kind ? { kind: edge.kind } : {}),
+        ...(edge.label ? { label: edge.label } : {}),
+      });
+      markEdgeJustCreated(newEdge.id);
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [edgeDetach, flow, removeEdge]);
+
+  // Plan 53 — Obsidian companion mailbox watcher. When the user has both
+  // (a) configured a vault and (b) toggled the watcher on, poll
+  // `Hypratia/.mailbox/incoming` for payloads dropped by the plugin and
+  // route them through Capture Preview, same as paste / import.
+  const mailboxEnabled = useStore(
+    (s) => Boolean(s.settings.mailboxWatcherEnabled),
+  );
+  const vaultPath = useStore((s) => s.settings.obsidianVaultPath);
+  useEffect(() => {
+    if (!mailboxEnabled || !vaultPath || !conversationId) return;
+    let docFocused = !document.hidden;
+    const onVis = () => {
+      docFocused = !document.hidden;
+    };
+    document.addEventListener('visibilitychange', onVis);
+    const handle = startMailboxWatcher({
+      vaultPath,
+      enabled: () => docFocused,
+      onPayload: (payload) => {
+        const text =
+          payload.kind === 'send-selection' ? payload.text : payload.content;
+        const title =
+          payload.kind === 'send-file' ? payload.title : payload.title ?? '';
+        const container = document.querySelector('.react-flow') as HTMLElement | null;
+        if (!container) return;
+        const r = container.getBoundingClientRect();
+        const landAt = flow.screenToFlowPosition({
+          x: r.left + r.width / 2,
+          y: r.top + r.height / 2,
+        });
+        setCaptureInput({
+          source: 'chatgpt-export',
+          title,
+          rawText: text,
+          conversationId,
+          landAt,
+        });
+      },
+    });
+    return () => {
+      handle.stop();
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [mailboxEnabled, vaultPath, conversationId, flow]);
 
   // Theme/project-root double-click → bulk select the connected component:
   // the root itself, every node reachable through incident edges, every
@@ -1353,10 +2223,13 @@ export function CanvasPanel({
   );
 
   return (
+    <EdgeDetachContext.Provider value={edgeDetach}>
     <main
       className={`canvas-panel tool-${canvasTool}${
         dragOver ? ' dragging-over' : ''
-      }${viewMode === 'titles' ? ' canvas-titles-only' : ''}`}
+      }${viewMode === 'titles' ? ' canvas-titles-only' : ''}${
+        edgeDetach ? ' is-edge-detaching' : ''
+      }`}
       onPointerDownCapture={onCanvasPointerDown}
       onContextMenu={onCanvasContextMenu}
       onDragOver={onDragOver}
@@ -1371,6 +2244,21 @@ export function CanvasPanel({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectStart={onConnectStart}
+        onConnectEnd={onConnectEnd}
+        isValidConnection={isValidConnection}
+        connectionRadius={60}
+        connectionMode={ConnectionMode.Loose}
+        connectOnClick={false}
+        connectionLineComponent={HypConnectionLine}
+        onNodeMouseEnter={(_, node) => {
+          if (connectingFromNodeId && node.id !== connectingFromNodeId) {
+            setConnectionTargetNodeId(node.id);
+          }
+        }}
+        onNodeMouseLeave={() => {
+          if (connectingFromNodeId) setConnectionTargetNodeId(null);
+        }}
         onNodeClick={onNodeClick}
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeContextMenu={(e, node) => {
@@ -1420,13 +2308,15 @@ export function CanvasPanel({
             setCtxMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
           }
         }}
-        onEdgeClick={() => {
-          // No-op handler exists solely so React Flow's `inactive` rule
-          // (`!isSelectable && !onClick`) never fires. Without it, edges
-          // get `pointer-events: none` whenever `elementsSelectable=false`
-          // (i.e. hand-tool mode), which silently breaks the right-click
-          // context menu. We don't want clicks to do anything special here
-          // — selection still happens through React Flow's own machinery.
+        onEdgeClick={(e, edge) => {
+          // Left-click on an edge: replace the canvas selection with this
+          // edge so the EdgeToolbar appears. React Flow's own `select`
+          // change events also flow through `onEdgesChange` above, but
+          // calling explicitly here makes the click immediately decisive
+          // (no waiting for React Flow's internal toggle pass) and lets us
+          // clear node selection in the same tick.
+          e.stopPropagation();
+          setCanvasSelection([], [edge.id]);
         }}
         onEdgeContextMenu={(e, edge) => {
           // Right-click on an edge: if it's already in the selection,
@@ -1466,6 +2356,43 @@ export function CanvasPanel({
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={24} size={1} color={dotColor} />
+        {/* Floating action bar shown when exactly one edge (and no nodes) is
+            selected. Replaces the previous right-click-only flow for delete /
+            swap-direction / focus / kind / label. The right-click menu still
+            works as a fallback. */}
+        {selectedEdgeIds.length === 1 && selectedNodeIds.length === 0 ? (
+          <EdgeToolbar edgeId={selectedEdgeIds[0]} />
+        ) : null}
+        {helperLines && (helperLines.vertical !== undefined || helperLines.horizontal !== undefined) ? (
+          <ViewportPortal>
+            {helperLines.vertical !== undefined ? (
+              <div
+                className="canvas-helper-line canvas-helper-line-v"
+                style={{
+                  position: 'absolute',
+                  left: helperLines.vertical,
+                  top: -100000,
+                  width: 1,
+                  height: 200000,
+                  pointerEvents: 'none',
+                }}
+              />
+            ) : null}
+            {helperLines.horizontal !== undefined ? (
+              <div
+                className="canvas-helper-line canvas-helper-line-h"
+                style={{
+                  position: 'absolute',
+                  top: helperLines.horizontal,
+                  left: -100000,
+                  height: 1,
+                  width: 200000,
+                  pointerEvents: 'none',
+                }}
+              />
+            ) : null}
+          </ViewportPortal>
+        ) : null}
       </ReactFlow>
       <CanvasToolSwitcher
         tool={canvasTool}
@@ -1500,6 +2427,10 @@ export function CanvasPanel({
           onSearch={() => {
             setSelectionMenu(null);
             setSearchOpen({ nodeIds: selectedNodeIds });
+          }}
+          onSearchWithLlm={() => {
+            setSelectionMenu(null);
+            setLlmSearchOpen({ nodeIds: selectedNodeIds });
           }}
           onOpenMarkdown={() => {
             setSelectionMenu(null);
@@ -1573,10 +2504,18 @@ export function CanvasPanel({
           initialQuery={searchOpen.initialQuery}
           onClose={() => setSearchOpen(null)}
           onFocusNode={(nodeId) => {
-            const node = useStore.getState().nodes.find((n) => n.id === nodeId);
-            if (!node) return;
             setCanvasSelection([nodeId], selectEdgesForNodes(storeEdges, [nodeId]));
-            flow.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 300 });
+            focusOnNodeCenter(nodeId, { zoom: 0.84, duration: 300 });
+          }}
+        />
+      ) : null}
+      {llmSearchOpen ? (
+        <LlmSearchSelectedModal
+          nodeIds={llmSearchOpen.nodeIds}
+          onClose={() => setLlmSearchOpen(null)}
+          onFocusNode={(nodeId) => {
+            setCanvasSelection([nodeId], selectEdgesForNodes(storeEdges, [nodeId]));
+            focusOnNodeCenter(nodeId, { zoom: 0.84, duration: 300 });
           }}
         />
       ) : null}
@@ -1601,7 +2540,44 @@ export function CanvasPanel({
           onFitView={fitCanvasView}
           onFitToCanvas={fitToCanvasEdges}
           onSetTool={setCanvasTool}
+          onExportObsidianCanvas={() => void exportObsidianCanvas()}
+          onSyncToVault={() => void syncEverythingToVault()}
           onClose={() => setPaneMenu(null)}
+        />
+      ) : null}
+      {connectionEndMenu ? (
+        <ConnectionEndMenu
+          x={connectionEndMenu.screen.x}
+          y={connectionEndMenu.screen.y}
+          onAddCard={() => addCardFromConnection(connectionEndMenu)}
+          onAddFromVault={() =>
+            void addVaultNoteFromConnection(connectionEndMenu)
+          }
+          onClose={() => setConnectionEndMenu(null)}
+        />
+      ) : null}
+      {captureInput ? (
+        <CapturePreview
+          input={captureInput}
+          onClose={() => setCaptureInput(null)}
+        />
+      ) : null}
+      {importPicker && conversationId ? (
+        <ImportChatgptPicker
+          conversations={importPicker.conversations}
+          onPick={(c) => {
+            const text = conversationToCaptureText(c);
+            const landAt = importPicker.landAt;
+            setImportPicker(null);
+            setCaptureInput({
+              source: 'chatgpt-export',
+              title: c.title,
+              rawText: text,
+              conversationId,
+              landAt,
+            });
+          }}
+          onClose={() => setImportPicker(null)}
         />
       ) : null}
       {empty ? (
@@ -1624,6 +2600,7 @@ export function CanvasPanel({
         />
       ) : null}
     </main>
+    </EdgeDetachContext.Provider>
   );
 }
 
@@ -1856,6 +2833,7 @@ function SelectionContextMenu({
   edgeCount,
   onAsk,
   onSearch,
+  onSearchWithLlm,
   onOpenMarkdown,
   onCopyLinks,
   onAddLinks,
@@ -1869,6 +2847,7 @@ function SelectionContextMenu({
   edgeCount: number;
   onAsk: () => void;
   onSearch: () => void;
+  onSearchWithLlm: () => void;
   onOpenMarkdown: () => void;
   onCopyLinks: () => void;
   onAddLinks: () => void;
@@ -1911,6 +2890,9 @@ function SelectionContextMenu({
       </div>
       <button type="button" onClick={onAsk}>{t('selection.ask')}</button>
       <button type="button" onClick={onSearch}>{t('selection.search')}</button>
+      <button type="button" onClick={onSearchWithLlm}>
+        {t('selection.searchWithLlm')}
+      </button>
       <button type="button" onClick={onOpenMarkdown}>
         {t('selection.openMarkdown')}
       </button>
@@ -2116,6 +3098,236 @@ function SearchSelectedModal({
               <strong>{result.title}</strong>
               <span>{result.path}</span>
               <p>{result.snippet}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type LlmSearchModelOption = {
+  provider: ProviderId;
+  model: string;
+  label: string;
+};
+
+function LlmSearchSelectedModal({
+  nodeIds,
+  onFocusNode,
+  onClose,
+}: {
+  nodeIds: string[];
+  onFocusNode: (nodeId: string) => void;
+  onClose: () => void;
+}) {
+  const allNodes = useStore((s) => s.nodes);
+  const providersConfig = useStore((s) => s.settings.providers);
+  const settingsModel = useStore((s) => s.settings.defaultModel);
+  const llmSearchModel = useStore((s) => s.settings.llmSearchModel);
+  const setLlmSearchModel = useStore((s) => s.setLlmSearchModel);
+  const conversations = useStore((s) => s.conversations);
+  const lastConversationId = useStore((s) => s.settings.lastConversationId);
+  const conv = conversations.find((c) => c.id === lastConversationId);
+
+  // Flat list of every (provider, model) pair the user has enabled. Built
+  // the same way ModelPicker builds its dropdown so the LLM-search picker
+  // stays in sync with what the chat picker offers.
+  const options = useMemo<LlmSearchModelOption[]>(() => {
+    const out: LlmSearchModelOption[] = [];
+    for (const pid of PROVIDER_ORDER) {
+      const cfg = providersConfig[pid];
+      if (!cfg?.enabled) continue;
+      const meta = PROVIDERS[pid];
+      const hidden = new Set(cfg.hiddenModels ?? []);
+      const all = [
+        ...meta.defaultModels,
+        ...(cfg.customModels ?? []),
+      ].filter((m, i, arr) => arr.indexOf(m) === i && !hidden.has(m));
+      for (const model of all) {
+        const m = meta.models[model];
+        out.push({
+          provider: pid,
+          model,
+          label: `${meta.label} · ${m?.label ?? model}`,
+        });
+      }
+    }
+    return out;
+  }, [providersConfig]);
+
+  // Model resolution priority:
+  //   1. explicit `settings.llmSearchModel` (user picked one previously)
+  //   2. Groq's first available model — Groq is free as of 2026 and fast,
+  //      so it's a sensible default for "scan my selected notes" tasks
+  //   3. active chat model (`conversation.modelOverride ?? settings.defaultModel`)
+  // Falls back to undefined if no provider is configured.
+  const effectiveModel: ModelRef | undefined = useMemo(() => {
+    if (
+      llmSearchModel &&
+      options.some(
+        (o) =>
+          o.provider === llmSearchModel.provider &&
+          o.model === llmSearchModel.model,
+      )
+    ) {
+      return llmSearchModel;
+    }
+    const groqOption = options.find((o) => o.provider === 'groq');
+    if (groqOption) return { provider: groqOption.provider, model: groqOption.model };
+    const chatModel = conv?.modelOverride ?? settingsModel;
+    if (
+      chatModel &&
+      options.some(
+        (o) => o.provider === chatModel.provider && o.model === chatModel.model,
+      )
+    ) {
+      return chatModel;
+    }
+    return options[0]
+      ? { provider: options[0].provider, model: options[0].model }
+      : undefined;
+  }, [llmSearchModel, options, conv?.modelOverride, settingsModel]);
+
+  const selectedNodes = useMemo(
+    () => allNodes.filter((n) => nodeIds.includes(n.id)),
+    [allNodes, nodeIds],
+  );
+
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<LlmSearchMatch[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  function pickModel(value: string) {
+    const [provider, model] = value.split('|');
+    if (!provider || !model) return;
+    setLlmSearchModel({ provider: provider as ProviderId, model });
+  }
+
+  async function runSearch() {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    if (!effectiveModel) {
+      setError('No AI provider configured. Open Settings → Providers & keys.');
+      return;
+    }
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setBusy(true);
+    setError(null);
+    try {
+      const matches = await searchNodesWithLlm({
+        query: trimmed,
+        nodes: selectedNodes,
+        model: effectiveModel,
+        signal: ctrl.signal,
+      });
+      if (ctrl.signal.aborted) return;
+      setResults(matches);
+    } catch (err) {
+      if (ctrl.signal.aborted) return;
+      setError(String(err));
+    } finally {
+      if (!ctrl.signal.aborted) setBusy(false);
+    }
+  }
+
+  const selectValue = effectiveModel
+    ? `${effectiveModel.provider}|${effectiveModel.model}`
+    : '';
+
+  return (
+    <div className="canvas-modal-backdrop">
+      <div className="canvas-modal search-modal">
+        <header>
+          <div>
+            <h2>Search with LLM</h2>
+            <p>{`${selectedNodes.length} selected notes`}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close">x</button>
+        </header>
+        <div className="canvas-search-controls">
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !busy) {
+                e.preventDefault();
+                void runSearch();
+              }
+            }}
+            placeholder="例: ＿＿＿みたいなこと書いてなかったっけ?"
+          />
+          <div className="canvas-search-scope">
+            <button
+              type="button"
+              className="active"
+              onClick={() => void runSearch()}
+              disabled={busy || !query.trim() || !effectiveModel}
+            >
+              {busy ? 'Searching…' : 'Search'}
+            </button>
+          </div>
+        </div>
+        <div className="canvas-search-controls">
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 12,
+              opacity: 0.85,
+              flex: 1,
+            }}
+          >
+            <span style={{ whiteSpace: 'nowrap' }}>Model</span>
+            <select
+              value={selectValue}
+              onChange={(e) => pickModel(e.target.value)}
+              disabled={options.length === 0}
+              style={{ flex: 1, minWidth: 0 }}
+            >
+              {options.length === 0 ? (
+                <option value="">No providers enabled</option>
+              ) : (
+                options.map((o) => (
+                  <option key={`${o.provider}|${o.model}`} value={`${o.provider}|${o.model}`}>
+                    {o.label}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+        </div>
+        {error ? <div className="canvas-modal-error">{error}</div> : null}
+        <div className="canvas-search-results">
+          {busy ? <div className="canvas-search-empty">Asking the model…</div> : null}
+          {!busy && query.trim() && results.length === 0 && !error ? (
+            <div className="canvas-search-empty">No matches.</div>
+          ) : null}
+          {results.map((r) => (
+            <button
+              type="button"
+              key={r.nodeId}
+              className="canvas-search-result"
+              onClick={() => {
+                onFocusNode(r.nodeId);
+                onClose();
+              }}
+            >
+              <strong>{r.title}</strong>
+              {r.reason ? <span>{r.reason}</span> : null}
+              <p>{r.snippet}</p>
             </button>
           ))}
         </div>

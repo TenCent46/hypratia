@@ -8,26 +8,20 @@ const SIDES: { pos: Position; key: string }[] = [
 ];
 
 /**
- * Renders 8 handles per node (4 sides × source + target with distinct ids),
- * so connections can be drawn from or into any side.
+ * Renders exactly 4 handles per node — one centered on each side. The canvas
+ * runs in `ConnectionMode.Loose`, which lets every handle act as both source
+ * and target, so a single handle per side is enough. With
+ * `connectionRadius={60}` and the larger hit-area in `.mc-handle::before`, the
+ * user does not need to land on the dot to connect.
  */
 export function NodeHandles() {
   return (
     <>
       {SIDES.map((s) => (
         <Handle
-          key={`src-${s.key}`}
-          id={`s-${s.key}`}
+          key={`h-${s.key}`}
+          id={`h-${s.key}`}
           type="source"
-          position={s.pos}
-          className="mc-handle"
-        />
-      ))}
-      {SIDES.map((s) => (
-        <Handle
-          key={`tgt-${s.key}`}
-          id={`t-${s.key}`}
-          type="target"
           position={s.pos}
           className="mc-handle"
         />

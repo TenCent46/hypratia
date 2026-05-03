@@ -50,6 +50,8 @@ Files:
 - [46 — Distill L3: premium re-structure (opt-in)](46-distill-premium-llm.md)
 - [47 — Map: auto-layout templates](47-map-auto-layout.md)
 - [48 — Export: JSON Canvas (Obsidian-compatible)](48-export-jsoncanvas-obsidian.md)
+- [52 — Vault sync + sidecar metadata (one-way Hypratia → Obsidian)](52-vault-sync-and-sidecars.md)
+- [53 — Obsidian companion plugin (DEFERRED to v1.3+)](53-obsidian-companion-plugin.md)
 
 ## Cross-cutting
 
