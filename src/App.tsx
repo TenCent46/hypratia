@@ -26,6 +26,7 @@ import { CommandPalette } from './components/CommandPalette/CommandPalette';
 import { ShortcutsModal } from './components/CommandPalette/ShortcutsModal';
 import { QuickCapture } from './components/QuickCapture/QuickCapture';
 import { ToastHost, showToast } from './components/Toast/Toast';
+import { startCanvasAutosave } from './services/storage/CanvasAutosaveRunner';
 import { WikilinkAmbiguityChooser } from './components/WikilinkAmbiguityChooser/WikilinkAmbiguityChooser';
 import { AIPalette } from './features/ai-palette/AIPalette';
 import { GraphImportModal } from './features/graph-import/GraphImportModal';
@@ -730,6 +731,14 @@ function ReadyApp() {
       window.removeEventListener('mc:open-canvas-node', onOpenCanvasNode);
     // setCanvasPanelStateRaw is referentially stable; canvasPanelStateRef is
     // a ref. Re-binding the listener every render would just shuffle work.
+  }, []);
+
+  // Canvas-geometry autosave. Once-per-app-lifetime; the runner internally
+  // checks for `obsidianVaultPath` on each flush so it picks up vault
+  // changes without re-subscribing. Body edits don't trigger this — only
+  // node moves / size changes / add+delete and edge add/delete/update.
+  useEffect(() => {
+    return startCanvasAutosave();
   }, []);
 
   useEffect(() => {

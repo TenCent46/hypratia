@@ -19,6 +19,18 @@ import {
   resolveMarkdownStorageDir,
   validateMarkdownStorageDir,
 } from '../../services/export/markdownStorage';
+import {
+  runLegacyVaultMigration,
+  type InAppMigrationResult,
+} from '../../services/storage/LegacyVaultMigrationRun';
+import {
+  refreshFromVault,
+  type RefreshSummary,
+} from '../../services/storage/RefreshFromVault';
+import {
+  runLibraryMdBackfill,
+  type RunBackfillResult,
+} from '../../services/storage/LibraryMarkdownBackfillRun';
 import type { ProviderId, Theme } from '../../types';
 import {
   CANVAS_FONT_SIZE_DEFAULT,
@@ -1007,6 +1019,9 @@ function VaultTab() {
       <MarkdownEditorSettingsSection />
       <ChatHistoryStorageSection />
       <ObsidianVaultSection />
+      <RefreshFromVaultSection />
+      <LibraryMdBackfillSection />
+      <LegacyVaultMigrationSection />
       <ArtifactSettingsSection />
       <ConversationMapSection />
     </>
@@ -1476,6 +1491,303 @@ function ObsidianVaultSection() {
           Show path
         </button>
       </div>
+    </section>
+  );
+}
+
+/**
+ * Pull markdown body changes from `Hypratia/Notes/` and
+ * `Hypratia/Conversations/` back into the in-app store. Identity match is
+ * by `hypratia_id` frontmatter — filename renames in Obsidian don't
+ * break the trail. No file watching; explicit-only.
+ */
+function RefreshFromVaultSection() {
+  const vaultPath = useStore((s) => s.settings.obsidianVaultPath);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<RefreshSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    if (!vaultPath) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const summary = await refreshFromVault(vaultPath);
+      setResult(summary);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="settings-section">
+      <h3>Refresh from Vault</h3>
+      <p className="muted">
+        Pull body edits made in Obsidian back into Hypratia. Matches by{' '}
+        <code>hypratia_id</code> frontmatter, so renaming a file in Obsidian
+        doesn't break the link. Frontmatter, position, sidecar — all stay
+        as Hypratia knows them.
+      </p>
+      {!vaultPath ? (
+        <p className="result error">
+          Pick an Obsidian vault above first.
+        </p>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={busy}
+            className="primary"
+          >
+            {busy ? 'Refreshing…' : 'Refresh from Vault'}
+          </button>
+          {result ? (
+            <div className="result ok">
+              Scanned {result.scanned} note(s) ·{' '}
+              {result.matched} matched · <strong>{result.updated} updated</strong> ·{' '}
+              {result.skipped} skipped
+              {result.unmatched.length > 0
+                ? ` (${result.unmatched.length} unmatched — see console)`
+                : ''}
+            </div>
+          ) : null}
+          {error ? <div className="result error">{error}</div> : null}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Sync existing Library `.md` files (pre-1.2 live storage that landed in
+ * `<appData>/LLM-Conversations/...`) into the canonical `Hypratia/Notes/`
+ * layout. Idempotent — re-runs merge in place. Updates `node.mdPath`
+ * for any matching nodes so subsequent writes flow through the new path.
+ */
+function LibraryMdBackfillSection() {
+  const vaultPath = useStore((s) => s.settings.obsidianVaultPath);
+  const customMarkdownDir = useStore(
+    (s) => s.settings.markdownStorageDir,
+  );
+  const [libraryRoot, setLibraryRoot] = useState<string>('');
+  const [archive, setArchive] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<RunBackfillResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Resolve the default library path on mount: the user's configured
+  // markdown-storage dir, falling back to the app-data default. The user
+  // can still override with the picker.
+  useEffect(() => {
+    let on = true;
+    resolveMarkdownStorageDir(customMarkdownDir)
+      .then((p) => {
+        if (on) setLibraryRoot(p);
+      })
+      .catch(() => {
+        // best-effort — leave libraryRoot empty so the picker is required.
+      });
+    return () => {
+      on = false;
+    };
+  }, [customMarkdownDir]);
+
+  async function pickLibrary() {
+    setError(null);
+    try {
+      const picked = await dialog.pickFolder();
+      if (picked) setLibraryRoot(picked);
+    } catch (err) {
+      setError(`Could not open folder picker: ${String(err)}`);
+    }
+  }
+
+  async function run(apply: boolean) {
+    if (!vaultPath || !libraryRoot) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const r = await runLibraryMdBackfill({
+        libraryRoot,
+        vaultRoot: vaultPath,
+        apply,
+        archiveOriginals: apply && archive,
+      });
+      setResult(r);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const summary = result?.plan.summary;
+  return (
+    <section className="settings-section">
+      <h3>Sync existing Library Markdown to Vault</h3>
+      <p className="muted">
+        Copy markdown files that currently live under your Library / app-data
+        folder into <code>Hypratia/Notes/</code>, generate sidecars, and
+        update <code>node.mdPath</code> for any matching nodes.
+        Idempotent — safe to re-run.
+      </p>
+      {!vaultPath ? (
+        <p className="result error">Pick an Obsidian vault above first.</p>
+      ) : (
+        <>
+          <div className="path-row">
+            <code>{libraryRoot || '(not yet resolved)'}</code>
+            <button type="button" onClick={pickLibrary} disabled={busy}>
+              Change…
+            </button>
+          </div>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={archive}
+              onChange={(e) => setArchive(e.target.checked)}
+              disabled={busy}
+            />{' '}
+            Move originals into{' '}
+            <code>Hypratia/.hypratia/backups/library-md-backfill-…</code>{' '}
+            after a successful apply
+          </label>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              onClick={() => void run(false)}
+              disabled={busy || !libraryRoot}
+            >
+              {busy ? 'Working…' : 'Dry-run (plan only)'}
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void run(true)}
+              disabled={busy || !libraryRoot}
+            >
+              {busy ? 'Working…' : 'Apply'}
+            </button>
+          </div>
+          {summary ? (
+            <div className={`result ${result?.applied ? 'ok' : ''}`}>
+              {result?.applied ? '✓ ' : ''}
+              {summary.md} note(s) · {summary.sidecars} sidecar(s) ·{' '}
+              {summary.nodeUpdates} node mdPath update(s){summary.skipped > 0
+                ? ` · ${summary.skipped} skipped`
+                : ''}
+              {summary.conflicts > 0
+                ? ` · ${summary.conflicts} conflict(s) (disambiguated)`
+                : ''}
+              {result?.archivedTo
+                ? ` · archived to ${result.archivedTo}`
+                : ''}
+            </div>
+          ) : null}
+          {error ? <div className="result error">{error}</div> : null}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * One-click migration of pre-1.2 `LLM-*` exports into the canonical
+ * `Hypratia/` layout. Idempotent — safe to re-run; conflicts get
+ * disambiguated filenames and recorded in the manifest.
+ */
+function LegacyVaultMigrationSection() {
+  const vaultPath = useStore((s) => s.settings.obsidianVaultPath);
+  const [busy, setBusy] = useState(false);
+  const [archiveOld, setArchiveOld] = useState(false);
+  const [result, setResult] = useState<InAppMigrationResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(apply: boolean) {
+    if (!vaultPath) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const r = await runLegacyVaultMigration({
+        vaultPath,
+        apply,
+        archiveOld: apply && archiveOld,
+      });
+      setResult(r);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const summary = result?.plan.summary;
+  return (
+    <section className="settings-section">
+      <h3>Migrate legacy folders</h3>
+      <p className="muted">
+        Move pre-1.2 <code>LLM-*</code> export folders into the canonical{' '}
+        <code>Hypratia/</code> layout. Idempotent — safe to re-run. Files
+        outside <code>LLM-*</code> are never touched.
+      </p>
+      {!vaultPath ? (
+        <p className="result error">
+          Pick an Obsidian vault above first.
+        </p>
+      ) : (
+        <>
+          <div className="path-row">
+            <code>{vaultPath}</code>
+          </div>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={archiveOld}
+              onChange={(e) => setArchiveOld(e.target.checked)}
+              disabled={busy}
+            />{' '}
+            Archive <code>LLM-*</code> folders into{' '}
+            <code>Hypratia/.hypratia/backups/</code> after a successful apply
+          </label>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              onClick={() => void run(false)}
+              disabled={busy}
+            >
+              {busy ? 'Working…' : 'Dry-run (plan only)'}
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void run(true)}
+              disabled={busy}
+            >
+              {busy ? 'Working…' : 'Apply'}
+            </button>
+          </div>
+          {summary ? (
+            <div className={`result ${result?.applied ? 'ok' : ''}`}>
+              {result?.applied ? '✓ ' : ''}
+              {summary.md} note(s) · {summary.canvas} canvas(es) ·{' '}
+              {summary.attachments} attachment(s) · {summary.sidecars}{' '}
+              sidecar(s){summary.conflicts > 0
+                ? ` · ${summary.conflicts} conflict(s) (disambiguated)`
+                : ''}
+              {result?.archivedTo
+                ? ` · archived to ${result.archivedTo}`
+                : ''}
+            </div>
+          ) : null}
+          {error ? <div className="result error">{error}</div> : null}
+        </>
+      )}
     </section>
   );
 }

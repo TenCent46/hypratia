@@ -37,6 +37,44 @@ export function readFrontmatterId(text: string): string | null {
 }
 
 /**
+ * Splice (or replace) the `aliases:` line in a Markdown frontmatter block
+ * with the given list, deduped. Used by migrations that need the
+ * title-as-alias to land in the file so Obsidian resolves `[[Title]]`
+ * even if Hypratia stores the file under a slug-based filename.
+ *
+ * `mergeMarkdownWithHypratia` deliberately ignores non-`hypratia_*` keys
+ * for safety, so this is a separate, opt-in surgical edit. Callers should
+ * pre-merge any user aliases (e.g., via `mergeAliases`) before passing.
+ */
+export function applyAliasesToFrontmatter(
+  markdown: string,
+  aliases: readonly string[],
+): string {
+  if (aliases.length === 0) return markdown;
+  const fmMatch = markdown.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+  if (!fmMatch) return markdown;
+  const fmBody = fmMatch[1];
+  const aliasLineRe = /^aliases:\s.*$/m;
+  const merged = Array.from(
+    new Set(aliases.map((a) => a.trim()).filter(Boolean)),
+  );
+  if (merged.length === 0) return markdown;
+  const aliasLine = `aliases: [${merged.map(yamlInlineString).join(', ')}]`;
+  const nextFmBody = aliasLineRe.test(fmBody)
+    ? fmBody.replace(aliasLineRe, aliasLine)
+    : `${fmBody}\n${aliasLine}`;
+  return markdown.replace(
+    /^---\s*\n[\s\S]*?\n---\s*\n?/,
+    `---\n${nextFmBody}\n---\n`,
+  );
+}
+
+function yamlInlineString(s: string): string {
+  if (/^[A-Za-z0-9_/:-]+$/.test(s)) return s;
+  return JSON.stringify(s);
+}
+
+/**
  * Merge a Hypratia-owned frontmatter patch into an existing Markdown file
  * **without** touching user-defined keys. The two-namespace rule:
  *

@@ -4,7 +4,7 @@
  * Strict, opinionated, one-way (Hypratia → Vault). We own `Hypratia/` inside
  * the vault and never touch anything outside that subtree. Re-running sync
  * is idempotent for canvases / sidecars Hypratia owns; user edits in
- * `Hypratia/notes/*.md` are preserved (a `.hypratia-update.md` sibling is
+ * `Hypratia/Notes/*.md` are preserved (a `.hypratia-update.md` sibling is
  * written instead of overwriting).
  *
  * Bidirectional sync is deferred to v1.3 — JSON-level merge of `.canvas`
@@ -74,9 +74,9 @@ export async function syncToVault(opts: {
 
   const root = `${vaultPath}/${HYPRATIA_DIR}`;
   await ensureDir(root);
-  await ensureDir(`${root}/canvases`);
-  await ensureDir(`${root}/notes`);
-  await ensureDir(`${root}/conversations`);
+  await ensureDir(`${root}/Canvases`);
+  await ensureDir(`${root}/Notes`);
+  await ensureDir(`${root}/Conversations`);
 
   for (const conv of conversations) {
     const convNodes = nodes.filter((n) => n.conversationId === conv.id);
@@ -102,7 +102,7 @@ export async function syncToVault(opts: {
       reason: 'overwrite',
     });
 
-    // Conflict pass over sidecars: if a `Hypratia/notes/{id}.md` exists with
+    // Conflict pass over sidecars: if a `Hypratia/Notes/{id}.md` exists with
     // a hypratia_id matching ours but the body differs, keep the user's
     // version and write a side-by-side `.hypratia-update.md`.
     for (const path of written.sidecarPaths) {
@@ -133,7 +133,8 @@ export async function syncToVault(opts: {
 
     // Conversation transcript (raw assistant + user turns) lives separately
     // so users can read the full history alongside the canvas.
-    const transcriptPath = `${root}/conversations/${slug(conv.title) || conv.id}.md`;
+    // Capitalized for consistency with ObsidianExporter / JsonCanvasExport.
+    const transcriptPath = `${root}/Conversations/${slug(conv.title) || conv.id}.md`;
     const transcriptBody = buildTranscriptStub(conv);
     if (transcriptBody) {
       await writeTextFile(transcriptPath, transcriptBody);
@@ -157,7 +158,7 @@ export async function syncToVault(opts: {
       .map((c) => ({
         id: c.id,
         title: c.title,
-        canvasFile: `canvases/${slug(c.title) || sanitize(c.id)}.canvas`,
+        canvasFile: `Canvases/${slug(c.title) || sanitize(c.id)}.canvas`,
       })),
   };
   await writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));

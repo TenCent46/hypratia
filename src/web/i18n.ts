@@ -188,13 +188,18 @@ const en: Dict = {
   'v2.hero.sub':
     'Hypratia turns chats, documents, PDFs, and ideas into a local-first thinking canvas.',
   'v2.hero.cta.download': 'Download for macOS',
+  'v2.hero.cta.demo': 'Try the live demo',
   'v2.hero.cta.github': 'View on GitHub',
   'v2.hero.meta': 'Free during beta · Apple Silicon & Intel · macOS 12+',
 
-  'v2.demo.eyebrow': 'A canvas that grows with the conversation',
-  'v2.demo.title': 'Where every chat finds its place.',
+  'v2.demo.eyebrow': 'See it in motion',
+  'v2.demo.title': 'A live canvas you can drive in the browser.',
   'v2.demo.sub':
-    'A simulated walkthrough of what Hypratia feels like in motion. The Mac app does the same — locally.',
+    'A no-install walkthrough of Hypratia — chat into the right pane, watch ideas land on the canvas. The Mac app does the same, locally.',
+  'v2.demo.cta': 'Open the live demo',
+  'v2.demo.note': 'Runs entirely in your browser · No sign-up · No keys required',
+  'v2.demo.preview.chat': 'Chat',
+  'v2.demo.preview.canvas': 'Canvas',
 
   'v2.features.eyebrow': 'Why Hypratia',
   'v2.features.title': 'Designed to keep your thinking, not capture it.',
@@ -249,6 +254,7 @@ const en: Dict = {
   'v2.finalcta.sub':
     'A quiet desktop app that keeps the thread you’re actually thinking in.',
   'v2.finalcta.download': 'Download for macOS',
+  'v2.finalcta.demo': 'Try the live demo',
   'v2.finalcta.github': 'Star on GitHub',
 
   'v2.footer.tagline': 'Local-first memory canvas for LLM conversations',
@@ -436,13 +442,19 @@ const ja: Dict = {
   'v2.hero.sub':
     'Hypratia は会話、ドキュメント、PDF、アイデアを、ローカルファーストの思考キャンバスに変えます。',
   'v2.hero.cta.download': 'macOS 版をダウンロード',
+  'v2.hero.cta.demo': 'ライブデモを試す',
   'v2.hero.cta.github': 'GitHub で見る',
   'v2.hero.meta': 'ベータ期間中は無料 · Apple Silicon と Intel · macOS 12 以降',
 
-  'v2.demo.eyebrow': '会話とともに育つキャンバス',
-  'v2.demo.title': 'すべてのチャットに、居場所を。',
+  'v2.demo.eyebrow': '実際に動かしてみる',
+  'v2.demo.title': 'ブラウザで触れる、生きたキャンバス。',
   'v2.demo.sub':
-    'Hypratia の動きを擬似再現したシミュレーション。Mac アプリでは同じことが、ローカルで起きます。',
+    'インストール不要。右でチャット、左のキャンバスにアイデアが落ちる。Mac アプリでは同じことが、ローカルで起きます。',
+  'v2.demo.cta': 'ライブデモを開く',
+  'v2.demo.note':
+    'ブラウザだけで完結 · サインアップ不要 · APIキー不要',
+  'v2.demo.preview.chat': 'Chat',
+  'v2.demo.preview.canvas': 'Canvas',
 
   'v2.features.eyebrow': 'なぜ Hypratia なのか',
   'v2.features.title': '思考を残すための設計。記録のためではなく。',
@@ -496,6 +508,7 @@ const ja: Dict = {
   'v2.finalcta.sub':
     '本当に考えていた糸を、ちゃんと残してくれる静かなデスクトップアプリ。',
   'v2.finalcta.download': 'macOS 版をダウンロード',
+  'v2.finalcta.demo': 'ライブデモを試す',
   'v2.finalcta.github': 'GitHub でスター',
 
   'v2.footer.tagline': 'LLM 会話のためのローカルファースト・メモリーキャンバス',
@@ -682,13 +695,18 @@ const zh: Dict = {
   'v2.hero.sub':
     'Hypratia 把对话、文档、PDF 与想法变成本地优先的思考画布。',
   'v2.hero.cta.download': '下载 macOS 版',
+  'v2.hero.cta.demo': '试试在线演示',
   'v2.hero.cta.github': '在 GitHub 查看',
   'v2.hero.meta': '测试期间免费 · Apple Silicon 与 Intel · macOS 12 及以上',
 
-  'v2.demo.eyebrow': '随对话生长的画布',
-  'v2.demo.title': '让每一段对话，都有一个落点。',
+  'v2.demo.eyebrow': '亲手体验',
+  'v2.demo.title': '在浏览器里就能驾驶的画布。',
   'v2.demo.sub':
-    '这是 Hypratia 运行起来的模拟演示。Mac 应用本地完成同样的事。',
+    '免安装演示：右侧聊天，左侧画布上落下想法。Mac 应用以同样的方式，在本地完成。',
+  'v2.demo.cta': '打开在线演示',
+  'v2.demo.note': '完全在浏览器中运行 · 无需注册 · 无需 API Key',
+  'v2.demo.preview.chat': 'Chat',
+  'v2.demo.preview.canvas': 'Canvas',
 
   'v2.features.eyebrow': '为什么选 Hypratia',
   'v2.features.title': '设计目的：留住思考，而不是抓取它。',
@@ -742,6 +760,7 @@ const zh: Dict = {
   'v2.finalcta.sub':
     '一个安静的桌面应用，留住你真正在思考的那条线索。',
   'v2.finalcta.download': '下载 macOS 版',
+  'v2.finalcta.demo': '试试在线演示',
   'v2.finalcta.github': '在 GitHub 上 Star',
 
   'v2.footer.tagline': '面向 LLM 对话的本地优先记忆画布',

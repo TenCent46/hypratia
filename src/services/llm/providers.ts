@@ -158,9 +158,59 @@ const ANTHROPIC_MODELS: Record<string, ModelMeta> = {
   },
 };
 
+// Groq production + free-tier preview models (2026-05). Free tier defaults to
+// 30 RPM / 6K TPM / 1K RPD, except where Groq has set per-model overrides.
+// Source: https://console.groq.com/docs/models
 const GROQ_MODELS: Record<string, ModelMeta> = {
+  'openai/gpt-oss-120b': {
+    id: 'openai/gpt-oss-120b',
+    label: 'GPT-OSS 120B (production)',
+    capabilities: ['text', 'thinking'],
+    inputUsdPer1M: 0.15,
+    outputUsdPer1M: 0.6,
+    contextWindow: 128000,
+  },
+  'meta-llama/llama-4-scout-17b-16e-instruct': {
+    id: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    label: 'Llama 4 Scout 17B (vision)',
+    capabilities: ['text', 'vision'],
+    inputUsdPer1M: 0.11,
+    outputUsdPer1M: 0.34,
+    contextWindow: 128000,
+  },
+  'openai/gpt-oss-20b': {
+    id: 'openai/gpt-oss-20b',
+    label: 'GPT-OSS 20B (fast)',
+    capabilities: ['text', 'thinking'],
+    inputUsdPer1M: 0.075,
+    outputUsdPer1M: 0.3,
+    contextWindow: 128000,
+  },
+  'moonshotai/kimi-k2-instruct-0905': {
+    id: 'moonshotai/kimi-k2-instruct-0905',
+    label: 'Kimi K2 0905 (256K, agentic)',
+    capabilities: ['text'],
+    inputUsdPer1M: 1,
+    cachedInputUsdPer1M: 0.5,
+    outputUsdPer1M: 3,
+    contextWindow: 262144,
+  },
+  'qwen/qwen3-32b': {
+    id: 'qwen/qwen3-32b',
+    label: 'Qwen 3 32B (reasoning)',
+    capabilities: ['text', 'thinking'],
+    inputUsdPer1M: 0.29,
+    outputUsdPer1M: 0.59,
+    contextWindow: 131072,
+  },
+  'deepseek-r1-distill-llama-70b': {
+    id: 'deepseek-r1-distill-llama-70b',
+    label: 'DeepSeek R1 distill (Llama 70B)',
+    capabilities: ['text', 'thinking'],
+  },
   'llama-3.3-70b-versatile': {
     id: 'llama-3.3-70b-versatile',
+    label: 'Llama 3.3 70B versatile',
     capabilities: ['text'],
     inputUsdPer1M: 0.59,
     outputUsdPer1M: 0.79,
@@ -168,26 +218,11 @@ const GROQ_MODELS: Record<string, ModelMeta> = {
   },
   'llama-3.1-8b-instant': {
     id: 'llama-3.1-8b-instant',
+    label: 'Llama 3.1 8B instant',
     capabilities: ['text'],
     inputUsdPer1M: 0.05,
     outputUsdPer1M: 0.08,
     contextWindow: 128000,
-  },
-  'mixtral-8x7b-32768': {
-    id: 'mixtral-8x7b-32768',
-    capabilities: ['text'],
-    inputUsdPer1M: 0.24,
-    outputUsdPer1M: 0.24,
-    contextWindow: 32768,
-  },
-  'qwen2.5-32b': {
-    id: 'qwen2.5-32b',
-    capabilities: ['text'],
-  },
-  'deepseek-r1-distill-llama-70b': {
-    id: 'deepseek-r1-distill-llama-70b',
-    label: 'DeepSeek R1 distill (Llama 70b)',
-    capabilities: ['text', 'thinking'],
   },
 };
 

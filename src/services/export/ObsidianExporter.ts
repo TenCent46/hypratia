@@ -44,11 +44,15 @@ export type ExportSummary = {
   skipped: { path: string; reason: string }[];
 };
 
-const DIR_CONVS = 'LLM-Conversations';
-const DIR_NODES = 'LLM-Nodes';
-const DIR_MAPS = 'LLM-Maps';
-const DIR_DAILY = 'LLM-Daily';
-const DIR_ATTACHMENTS = 'LLM-Attachments';
+// Hypratia-canonical layout. The migration tool moves any pre-existing
+// `LLM-*` folders into this same shape — see
+// `src/services/migration/legacyVaultMigration.ts`. This module is the
+// single emitter; nothing else writes vault paths.
+const DIR_CONVS = 'Hypratia/Notes';
+const DIR_NODES = 'Hypratia/Notes';
+const DIR_MAPS = 'Hypratia/Canvases';
+const DIR_DAILY = 'Hypratia/Daily';
+const DIR_ATTACHMENTS = 'Hypratia/Attachments';
 
 /**
  * Build a vault-relative path (without `.md`) for a node — used as the

@@ -27,7 +27,10 @@
  *      conflict — never a silent overwrite.
  */
 
-import { mergeMarkdownWithHypratia } from '../export/frontmatter.ts';
+import {
+  applyAliasesToFrontmatter,
+  mergeMarkdownWithHypratia,
+} from '../export/frontmatter.ts';
 import {
   mergeAliases,
   type FrontmatterIdentity,
@@ -482,37 +485,6 @@ function bodyForMd(text: string, _aliases: string[], _title: string): string {
   const m = text.match(/^---\s*\n[\s\S]*?\n---\s*\n?/);
   if (m) return text.slice(m[0].length);
   return text;
-}
-
-/**
- * `mergeMarkdownWithHypratia` only updates `hypratia_*` keys (by design).
- * The migration also wants to surface the title as an Obsidian alias so
- * `[[Title]]` resolves in Obsidian; we splice the merged `aliases:` line
- * in here as a deliberate exception, additively.
- */
-function applyAliasesToFrontmatter(
-  markdown: string,
-  aliases: string[],
-): string {
-  if (aliases.length === 0) return markdown;
-  const fmMatch = markdown.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
-  if (!fmMatch) return markdown;
-  const fmBody = fmMatch[1];
-  const aliasLineRe = /^aliases:\s.*$/m;
-  const merged = [...new Set(aliases.map((a) => a.trim()).filter(Boolean))];
-  const aliasLine = `aliases: [${merged.map(yamlInlineString).join(', ')}]`;
-  const nextFmBody = aliasLineRe.test(fmBody)
-    ? fmBody.replace(aliasLineRe, aliasLine)
-    : `${fmBody}\n${aliasLine}`;
-  return markdown.replace(
-    /^---\s*\n[\s\S]*?\n---\s*\n?/,
-    `---\n${nextFmBody}\n---\n`,
-  );
-}
-
-function yamlInlineString(s: string): string {
-  if (/^[A-Za-z0-9_/:-]+$/.test(s)) return s;
-  return JSON.stringify(s);
 }
 
 function sanitizeId(id: string): string {

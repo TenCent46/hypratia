@@ -19,6 +19,45 @@ async function getService(): Promise<TurndownServiceType> {
     filter: ['del', 's'] as unknown as TurndownServiceType.Filter,
     replacement: (content) => `~~${content}~~`,
   });
+  // GFM tables — turndown's defaults emit nothing for <table> / <tr> / <td>,
+  // so an HTML table copied from a webpage paste-collapses into a stream of
+  // cell text. Convert it back into a real GFM pipe table so the canvas
+  // markdown renderer can show it as a bordered grid.
+  td.addRule('gfmTable', {
+    filter: 'table',
+    replacement: (_content, node) => {
+      const el = node as HTMLTableElement;
+      const rows = Array.from(el.querySelectorAll('tr'));
+      if (rows.length === 0) return '';
+      const cells: string[][] = rows.map((row) =>
+        Array.from(row.querySelectorAll('th, td')).map((cell) =>
+          (cell.textContent ?? '')
+            .replace(/\s+/g, ' ')
+            .replace(/\|/g, '\\|')
+            .trim(),
+        ),
+      );
+      const colCount = cells.reduce((m, r) => Math.max(m, r.length), 0);
+      if (colCount === 0) return '';
+      const padded = cells.map((r) => {
+        const out = r.slice();
+        while (out.length < colCount) out.push('');
+        return out;
+      });
+      // Use the first row as the header (whether or not <thead> exists);
+      // GFM tables require a header + separator. If the source had no
+      // header row this misclassifies the first body row, but that's far
+      // less destructive than dropping the table entirely.
+      const [header, ...body] = padded;
+      const sep = Array(colCount).fill('---');
+      const lines = [
+        `| ${header.join(' | ')} |`,
+        `| ${sep.join(' | ')} |`,
+        ...body.map((r) => `| ${r.join(' | ')} |`),
+      ];
+      return `\n\n${lines.join('\n')}\n\n`;
+    },
+  });
   // Task list checkboxes — drop them through, GitHub-flavored.
   td.addRule('taskListItem', {
     filter: (node) =>

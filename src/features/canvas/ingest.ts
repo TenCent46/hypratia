@@ -74,6 +74,26 @@ function isImageFile(file: File): boolean {
   return file.type.startsWith('image/') || IMAGE_EXTENSIONS.has(extFromName(file.name));
 }
 
+/**
+ * If the pasted content is a single ```...``` block whose body is a GFM
+ * pipe table, strip the fence so the renderer shows the table as a
+ * grid rather than as a literal code dump.
+ *
+ * Trigger: copying from a chat reply that renders a Markdown table
+ * inside a fenced code block — the user pastes expecting the rendered
+ * table, not the source. We only fire on the table-separator signal
+ * (`|---|---|`) because that line shape is unique to GFM tables — code
+ * examples in `# heading` or `1. step` style would otherwise also match
+ * a broader heuristic and get incorrectly unwrapped.
+ */
+function unwrapMarkdownInsideFence(text: string): string {
+  const m = text.match(/^```[^\n]*\n([\s\S]*?)\n```\s*$/);
+  if (!m) return text;
+  const inner = m[1];
+  const hasTableSeparator = /^\s*\|[\s\-:|]+\|\s*$/m.test(inner);
+  return hasTableSeparator ? inner : text;
+}
+
 function fitImageNodeSize(
   width: number | undefined,
   height: number | undefined,
@@ -272,7 +292,7 @@ export async function pasteToCanvas(
 
   const md = payload.html.trim() ? await htmlToMarkdown(payload.html) : '';
   const kind: 'markdown' | 'text' = md ? 'markdown' : 'text';
-  const content = (md || payload.text).trim();
+  const content = unwrapMarkdownInsideFence((md || payload.text).trim());
   if (!content) return { created: 0, kind: 'none' };
 
   const { addNode } = useStore.getState();

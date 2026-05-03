@@ -21,7 +21,7 @@ import type {
  * works whether or not Hypratia is running. Three commands:
  *
  *  - **Refresh canvas geometry from sidecar** — re-applies positions from
- *    `Hypratia/canvases/{name}.hypratia.json` to the active `.canvas`.
+ *    `Hypratia/Canvases/{name}.hypratia.json` to the active `.canvas`.
  *    Lets users rewind a canvas to Hypratia's last-known layout after
  *    moving things around in Obsidian.
  *  - **Send selection to Hypratia** — writes the active selection (or whole

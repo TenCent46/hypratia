@@ -56,7 +56,12 @@ export function LandingNav() {
 
         <ul className="hidden items-center gap-0.5 sm:flex">
           {[
-            ['#demo', t('nav.demo')],
+            // /demo is a separate Vite entry served by Vercel (rewrites in
+            // vercel.json). Use a route href, not a hash, so visitors leave
+            // the marketing page entirely instead of scrolling to a
+            // mockup. The standalone live-demo page is at
+            // index.demo.html in dev.
+            ['/demo', t('nav.demo')],
             ['#features', t('nav.features')],
             ['#privacy', t('nav.privacy')],
             ['#pricing', t('nav.pricing')],

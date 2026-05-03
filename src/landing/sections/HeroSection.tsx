@@ -4,6 +4,7 @@ import { HypratiaIcon } from '../../web/HypratiaIcon';
 
 const REPO_URL = 'https://github.com/TenCent46/hypratia';
 const DOWNLOAD_URL = '#';
+const DEMO_URL = '/demo';
 
 export function HeroSection() {
   const { t } = useLocale();
@@ -67,6 +68,13 @@ export function HeroSection() {
             {t('v2.hero.cta.download')}
           </a>
           <a
+            href={DEMO_URL}
+            className="group inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-5 py-3 text-[14px] font-medium text-white/90 backdrop-blur-md transition hover:border-white/25 hover:bg-white/[0.10] hover:text-white"
+          >
+            <PlayGlyph />
+            {t('v2.hero.cta.demo')}
+          </a>
+          <a
             href={REPO_URL}
             target="_blank"
             rel="noreferrer"
@@ -99,6 +107,16 @@ function DownloadGlyph() {
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function PlayGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M7 5l12 7-12 7V5z"
+        fill="currentColor"
       />
     </svg>
   );

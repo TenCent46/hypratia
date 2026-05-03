@@ -6,7 +6,7 @@
  * bill anyone — only to estimate / track local spend in `CostTracker`.
  */
 
-export const PRICE_TABLE_VERSION = '2026-05-02';
+export const PRICE_TABLE_VERSION = '2026-05-03';
 
 export type ModelPricing = {
   /** Match by exact id or `model.startsWith(prefix)`. First hit wins. */
@@ -43,7 +43,15 @@ export const PRICE_TABLE: ModelPricing[] = [
   { match: 'gemini-1.5-pro', tier: 'L3', inputPerM: 1.25, outputPerM: 5 },
   { match: 'gemini-2.0-flash', tier: 'L2', inputPerM: 0.1, outputPerM: 0.4 },
   { match: 'gemini-2.5-pro', tier: 'L3', inputPerM: 1.5, outputPerM: 6 },
-  // --- Mistral / Groq / others fallthrough as cheap (rough) ---
+  // --- Groq (free-tier eligible; prefix order = more specific first) ---
+  { match: 'openai/gpt-oss-120b', tier: 'L2', inputPerM: 0.15, outputPerM: 0.6 },
+  { match: 'openai/gpt-oss-20b', tier: 'L2', inputPerM: 0.075, outputPerM: 0.3 },
+  { match: 'meta-llama/llama-4', tier: 'L2', inputPerM: 0.11, outputPerM: 0.34 },
+  { match: 'moonshotai/kimi-k2', tier: 'L3', inputPerM: 1, outputPerM: 3 },
+  { match: 'qwen/qwen3', tier: 'L2', inputPerM: 0.29, outputPerM: 0.59 },
+  { match: 'llama-3.3-70b', tier: 'L2', inputPerM: 0.59, outputPerM: 0.79 },
+  { match: 'llama-3.1-8b', tier: 'L2', inputPerM: 0.05, outputPerM: 0.08 },
+  // --- Mistral / others fallthrough as cheap (rough) ---
 ];
 
 export function priceOf(modelId: string): ModelPricing | null {

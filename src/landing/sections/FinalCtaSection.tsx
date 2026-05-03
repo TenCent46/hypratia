@@ -3,6 +3,7 @@ import { useLocale } from '../../web/LocaleProvider';
 
 const REPO_URL = 'https://github.com/TenCent46/hypratia';
 const DOWNLOAD_URL = '#';
+const DEMO_URL = '/demo';
 
 export function FinalCtaSection() {
   const { t } = useLocale();
@@ -31,6 +32,12 @@ export function FinalCtaSection() {
             className="rounded-full bg-white px-6 py-3.5 text-[14px] font-semibold text-ink-950 shadow-[0_18px_50px_-16px_rgba(255,255,255,0.55)] transition hover:-translate-y-0.5 hover:bg-white/95"
           >
             {t('v2.finalcta.download')}
+          </a>
+          <a
+            href={DEMO_URL}
+            className="rounded-full border border-white/15 bg-white/[0.06] px-6 py-3.5 text-[14px] font-medium text-white/90 backdrop-blur-md transition hover:border-white/25 hover:bg-white/[0.10] hover:text-white"
+          >
+            {t('v2.finalcta.demo')}
           </a>
           <a
             href={REPO_URL}

@@ -6,13 +6,18 @@ import {
   ensureFolderPath,
   type MarkdownTreeNode,
 } from '../storage/MarkdownFileService';
-import {
-  PROJECT_CHAT_HISTORY_DIR,
-  ROOT_CHAT_HISTORY_DIR,
-  isMirrorManagedPath,
-  projectBasePath,
-} from '../knowledge/knowledgeBaseLayout';
+import { isMirrorManagedPath } from '../knowledge/knowledgeBaseLayout';
+import { buildMarkdown } from '../export/frontmatter';
 import { wikiTitle } from './WikiLinkSyncService';
+
+/**
+ * Canonical folder for canvas-node markdown bodies. **One single location**
+ * regardless of project — project membership lives in frontmatter
+ * (`hypratia_project`) so the vault stays a flat, Obsidian-readable
+ * structure. Aligns with `services/export/ObsidianExporter` and
+ * `services/migration/legacyVaultMigration`.
+ */
+const CANVAS_NOTES_DIR = 'Hypratia/Notes';
 
 export type MarkdownContextFile = {
   nodeId: ID;
@@ -42,15 +47,40 @@ function sanitizeFileBase(title: string): string {
   return base || 'Untitled';
 }
 
-function canvasFolderForNode(node: CanvasNode): string {
+function canvasFolderForNode(_node: CanvasNode): string {
+  // Single canonical location. Per-project organization is preserved as
+  // `hypratia_project` frontmatter so Obsidian sees a flat `Hypratia/Notes/`
+  // tree without weird nested folders.
+  return CANVAS_NOTES_DIR;
+}
+
+/** Build the initial Markdown body for a freshly-created canvas note —
+ *  Hypratia frontmatter + (optional) user content. The frontmatter is what
+ *  makes the file resolvable from `[[Title]]` clicks later (via the
+ *  `aliases` line) and identifiable across renames (via `hypratia_id`). */
+function buildHypratiaCanonicalMarkdown(
+  node: CanvasNode,
+  body: string,
+): string {
   const state = useStore.getState();
   const conv = state.conversations.find((c) => c.id === node.conversationId);
   const project = conv?.projectId
     ? state.projects.find((p) => p.id === conv.projectId)
     : undefined;
-  return project
-    ? `${projectBasePath(project)}/${PROJECT_CHAT_HISTORY_DIR}`
-    : ROOT_CHAT_HISTORY_DIR;
+  const title = (node.title || 'Untitled').trim();
+  // If body already starts with frontmatter, strip it — we're emitting our own.
+  const cleanBody = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
+  const fm: Record<string, unknown> = {
+    hypratia_id: node.id,
+    hypratia_kind: node.kind ?? 'note',
+    hypratia_conversation: node.conversationId,
+    hypratia_created: node.createdAt,
+    hypratia_updated: node.updatedAt,
+    aliases: [title],
+  };
+  if (project) fm.hypratia_project = project.id;
+  if (node.tags && node.tags.length > 0) fm.tags = node.tags;
+  return buildMarkdown(fm, cleanBody);
 }
 
 async function createCanonicalFile(
@@ -65,8 +95,12 @@ async function createCanonicalFile(
     const name = i === 0 ? `${base}.md` : `${base}-${i + 1}.md`;
     try {
       const path = await markdownFiles.createFile(rootPath, folder, name);
-      const content = node.contentMarkdown || `# ${node.title || base}\n`;
-      await markdownFiles.writeFile(rootPath, path, content);
+      const body = node.contentMarkdown || `# ${node.title || base}\n`;
+      await markdownFiles.writeFile(
+        rootPath,
+        path,
+        buildHypratiaCanonicalMarkdown(node, body),
+      );
       return path;
     } catch (err) {
       lastErr = err;

@@ -1,7 +1,7 @@
 import { Backdrop } from './sections/Backdrop';
 import { LandingNav } from './sections/LandingNav';
 import { HeroSection } from './sections/HeroSection';
-import { InteractiveAppDemo } from './sections/InteractiveAppDemo';
+import { DemoTeaserSection } from './sections/DemoTeaserSection';
 import { FeaturesSection } from './sections/FeaturesSection';
 import { PrivacySection } from './sections/PrivacySection';
 import { PricingSection } from './sections/PricingSection';
@@ -15,7 +15,7 @@ export function LandingApp() {
       <LandingNav />
       <main className="relative">
         <HeroSection />
-        <InteractiveAppDemo />
+        <DemoTeaserSection />
         <FeaturesSection />
         <PrivacySection />
         <PricingSection />

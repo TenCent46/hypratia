@@ -2975,7 +2975,40 @@ input::placeholder {
   overflow-x: auto;
 }
 /* GFM tables — `--border-strong` already adapts per theme so the grid
-   stays visible against any node surface (light/sepia/violet/dark/etc.). */
+   stays visible against any node surface (light/sepia/violet/dark/etc.).
+   Wrapped by react-markdown's table override in <div class="md-table-scroll">
+   to give wide tables horizontal overflow inside the node body. */
+.md-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 6px 0;
+  max-width: 100%;
+}
+.md-table-scroll > table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  border: 1px solid var(--border-strong);
+  font-size: 0.95em;
+  margin: 0;
+}
+.md-table-scroll > table th,
+.md-table-scroll > table td {
+  border: 1px solid var(--border-strong);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.md-table-scroll > table thead th,
+.md-table-scroll > table th {
+  background: var(--bg-soft);
+  font-weight: 600;
+}
+.md-table-scroll > table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-soft) 45%, transparent);
+}
+/* Legacy descendant selectors kept so any caller that renders the bare
+   <table> without the scroll wrapper (e.g. third-party Markdown) still
+   gets the bordered grid. */
 .markdown-node .content table {
   border-collapse: collapse;
   border: 1px solid var(--border-strong);

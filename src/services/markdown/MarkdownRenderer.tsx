@@ -611,6 +611,18 @@ function MarkdownRendererImpl({
           }
           return <CodeBlockWithSave {...props} onSave={onSaveCodeBlock} />;
         },
+        table(props) {
+          // Wrap GFM tables in a horizontally-scrollable container so a
+          // table wider than the node body keeps its right-hand border
+          // and last column visible (the .content overflow-x: hidden on
+          // canvas nodes was clipping them otherwise — making bordered
+          // tables look "borderless").
+          return (
+            <div className="md-table-scroll">
+              <table {...(props as object)} />
+            </div>
+          );
+        },
       }}
     >
       {text}

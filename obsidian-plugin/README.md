@@ -13,7 +13,7 @@ Three commands surface in Obsidian's command palette:
 
 | Command | What it does |
 | --- | --- |
-| **Hypratia: Refresh canvas geometry from Hypratia sidecar** | Re-applies node positions stored in `Hypratia/canvases/{name}.hypratia.json` to the active `.canvas` file. Use it to "rewind" a canvas to Hypratia's last-known layout after moving things around in Obsidian. Body / labels are not touched. |
+| **Hypratia: Refresh canvas geometry from Hypratia sidecar** | Re-applies node positions stored in `Hypratia/Canvases/{name}.hypratia.json` to the active `.canvas` file. Use it to "rewind" a canvas to Hypratia's last-known layout after moving things around in Obsidian. Body / labels are not touched. |
 | **Hypratia: Send selection to Hypratia** | Writes the active selection (or the whole file when nothing is selected) to `Hypratia/.mailbox/incoming/{nano}.json`. With Hypratia running and the mailbox watcher enabled (Settings → Capture), the payload opens in the Capture Preview. |
 | **Hypratia: Send active file to Hypratia** | Same as above but for the entire active note. |
 | **Hypratia: Open active note in Hypratia** | Launches `hypratia://open?id=…` for notes that carry a `hypratia_id` frontmatter key. Falls back to `?path=…` for plain notes. Requires Hypratia desktop to be installed and the URL scheme registered. |
