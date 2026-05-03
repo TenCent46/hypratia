@@ -6,8 +6,8 @@
   "framework": null,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/", "destination": "/index.landing.html" },
-    { "source": "/index.html", "destination": "/index.landing.html" },
+    { "source": "/", "destination": "/index.demo.html" },
+    { "source": "/index.html", "destination": "/index.demo.html" },
     { "source": "/demo", "destination": "/index.demo.html" },
     { "source": "/demo/", "destination": "/index.demo.html" }
   ]
