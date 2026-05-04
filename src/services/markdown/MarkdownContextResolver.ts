@@ -14,7 +14,7 @@ import { wikiTitle } from './WikiLinkSyncService';
  * Canonical folder for canvas-node markdown bodies. **One single location**
  * regardless of project — project membership lives in frontmatter
  * (`hypratia_project`) so the vault stays a flat, Obsidian-readable
- * structure. Aligns with `services/export/ObsidianExporter` and
+ * structure. Aligns with `services/export/VaultSync` and
  * `services/migration/legacyVaultMigration`.
  */
 const CANVAS_NOTES_DIR = 'Hypratia/Notes';
@@ -140,13 +140,27 @@ export async function resolveMarkdownContext(
     const node = useStore.getState().nodes.find((n) => n.id === nodeId);
     if (!node) continue;
     const path = await ensureNodeMarkdownPath(rootPath, nodeId);
-    if (!path) continue;
-    const content = await markdownFiles.readFile(rootPath, path);
+    if (path) {
+      const content = await markdownFiles.readFile(rootPath, path);
+      files.push({
+        nodeId,
+        title: wikiTitle({ ...node, mdPath: path }),
+        path,
+        content,
+      });
+      continue;
+    }
+    // No resolvable vault file (theme/image/pdf/artifact node, or a
+    // markdown node not yet flushed to disk). Fall back to the in-memory
+    // body so the LLM still sees the selection — silently dropping these
+    // produced "Context: 0 files" even when the user picked 7 nodes.
+    const inlineBody = node.contentMarkdown ?? '';
+    if (!inlineBody && !node.title) continue;
     files.push({
       nodeId,
-      title: wikiTitle({ ...node, mdPath: path }),
-      path,
-      content,
+      title: node.title || `Node ${nodeId}`,
+      path: '',
+      content: inlineBody,
     });
   }
 
@@ -164,9 +178,12 @@ export async function resolveMarkdownContext(
     return `- ${source} -> ${target}${e.label ? ` (${e.label})` : ''}`;
   });
 
-  const fileBlocks = files.map(
-    (f) => `### ${f.title}\nPath: ${f.path}\nNode: ${f.nodeId}\n\n${f.content}`,
-  );
+  const fileBlocks = files.map((f) => {
+    const header = f.path
+      ? `### ${f.title}\nPath: ${f.path}\nNode: ${f.nodeId}`
+      : `### ${f.title}\nNode: ${f.nodeId} (in-memory)`;
+    return `${header}\n\n${f.content}`;
+  });
 
   return {
     rootPath,

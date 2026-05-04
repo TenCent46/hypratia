@@ -105,6 +105,8 @@ const ja: Strings = {
     selectTool: '選択ツール',
     handTool: 'ハンドツール',
     cancel: 'キャンセル',
+    askWithSelected_one: '選択中のノードに質問',
+    askWithSelected_other: '選択中の{{count}}ノードに質問',
     empty: {
       pickProject:
         'パネルでプロジェクトまたは会話を選ぶとそのノードが表示されます。',

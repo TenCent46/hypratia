@@ -73,12 +73,20 @@ export async function writeCanvasFile(opts: {
         existing = '';
       }
     }
-    // Merge keeps user-defined frontmatter (title, tags, aliases, plugin
-    // keys, Properties UI values…) intact and only updates the
-    // `hypratia_*` namespace. The body is replaced wholesale because we
-    // currently treat Hypratia as the source of truth for node content
-    // (one-way export — full bidirectional editing is plan v1.3+).
-    const next = mergeMarkdownWithHypratia(existing, s.patch, s.body);
+    // Merge keeps user-defined frontmatter (tags, plugin keys,
+    // Properties UI values…) intact and updates the `hypratia_*`
+    // namespace + the public Hypratia-managed keys (id, title,
+    // hypratiaType, aliases). User-added aliases survive — see
+    // `mergeMarkdownWithHypratia.publicPatch.ensureAliases`. The body
+    // is replaced wholesale because we currently treat Hypratia as
+    // the source of truth for node content (one-way export — full
+    // bidirectional editing routes through Refresh from Vault).
+    const next = mergeMarkdownWithHypratia(
+      existing,
+      s.patch,
+      s.body,
+      s.publicPatch,
+    );
     await writeTextFile(path, next);
     sidecarPaths.push(path);
   }

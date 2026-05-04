@@ -133,7 +133,7 @@ export async function syncToVault(opts: {
 
     // Conversation transcript (raw assistant + user turns) lives separately
     // so users can read the full history alongside the canvas.
-    // Capitalized for consistency with ObsidianExporter / JsonCanvasExport.
+    // Capitalized for consistency with JsonCanvasExport.
     const transcriptPath = `${root}/Conversations/${slug(conv.title) || conv.id}.md`;
     const transcriptBody = buildTranscriptStub(conv);
     if (transcriptBody) {

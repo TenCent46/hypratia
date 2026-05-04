@@ -99,6 +99,28 @@ type UI = {
         selection: string;
         origin: string | null;
         systemContext?: string;
+        /**
+         * Explicit list of canvas node ids the palette should auto-link the
+         * answer to. Set when the palette is opened from a multi-node canvas
+         * selection. When non-empty, takes precedence over `origin`-based
+         * single-node parsing in the auto-link path so all selected nodes
+         * end up edged to the answer (not just the first). The single-node
+         * `canvas-node:<id>` and `canvas-selection:<id>:s:e` origins keep
+         * working unchanged for callers that don't set this.
+         */
+        sourceNodeIds?: string[];
+        /**
+         * Real summary of the resolved context — populated by callers that
+         * already ran `buildCanvasAskContext`. Drives the chat-message
+         * "Context: N files, M links" badge so it stops lying about a
+         * non-empty selection. Optional; falls back to undefined for
+         * non-canvas asks (text selection inside a node, etc.).
+         */
+        contextSummary?: {
+          fileCount: number;
+          edgeCount: number;
+          fileNames: string[];
+        };
       }
     | null;
   sidebarCollapsed: boolean;
@@ -236,6 +258,15 @@ type State = {
   updateNodePosition: (id: ID, position: { x: number; y: number }) => void;
   updateNodeSize: (id: ID, size: { width: number; height: number }) => void;
   updateNode: (id: ID, patch: Partial<Omit<CanvasNode, 'id'>>) => void;
+  /** Record the body hash + timestamp both sides agreed on at the
+   *  last successful sync. Does NOT bump `updatedAt` — the node
+   *  itself didn't change, we're just stamping conflict-detection
+   *  metadata. Used by Force Re-sync Now and by Refresh from Vault
+   *  after applying a `vault-changed-only` pull. */
+  setNodeSyncMeta: (
+    id: ID,
+    meta: { lastSyncedBodyHash: string; lastSyncedAt: string },
+  ) => void;
   removeNode: (id: ID) => void;
 
   addEdge: (input: Omit<Edge, 'id' | 'createdAt'>) => Edge;
@@ -265,6 +296,10 @@ type State = {
   setMailboxWatcherEnabled: (enabled: boolean) => void;
   /** Record the timestamp of the last successful "Force re-sync now". */
   setLastResyncAt: (iso: string) => void;
+  /** Record the timestamp of the last successful canvas autosave write.
+   *  Called by the Tauri-side autosave runner after an atomic `.canvas`
+   *  rename — used by Sync Doctor to confirm autosave liveness. */
+  setLastCanvasAutosaveAt: (iso: string) => void;
   setChatTabsAutoHide: (autoHide: boolean) => void;
   setChatTabsInSidebar: (inSidebar: boolean) => void;
   reopenLastClosedConversation: () => ID | null;
@@ -279,6 +314,8 @@ type State = {
   removeProvider: (id: ProviderId) => void;
   setDefaultModel: (model: ModelRef | undefined) => void;
   setLlmSearchModel: (model: ModelRef | undefined) => void;
+  /** Plan/v1/31 Step 5 — opt-in embedding provider for ingest routing. */
+  setEmbeddingsProvider: (provider: 'off' | 'mock' | undefined) => void;
   setSystemPrompt: (prompt: string | undefined) => void;
   setEditorMode: (mode: EditorMode) => void;
   setMarkdownAutoSave: (enabled: boolean) => void;
@@ -307,6 +344,12 @@ type State = {
     selection: string,
     origin: string | null,
     systemContext?: string,
+    sourceNodeIds?: string[],
+    contextSummary?: {
+      fileCount: number;
+      edgeCount: number;
+      fileNames: string[];
+    },
   ) => void;
   closeAiPalette: () => void;
 };
@@ -927,6 +970,22 @@ export const useStore = create<State>()(
         ),
       })),
 
+    setNodeSyncMeta: (id, meta) =>
+      set((s) => ({
+        nodes: s.nodes.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                syncMeta: {
+                  ...n.syncMeta,
+                  lastSyncedBodyHash: meta.lastSyncedBodyHash,
+                  lastSyncedAt: meta.lastSyncedAt,
+                },
+              }
+            : n,
+        ),
+      })),
+
     removeNode: (id) =>
       set((s) => {
         const removed = s.nodes.find((n) => n.id === id);
@@ -1167,6 +1226,11 @@ export const useStore = create<State>()(
         settings: { ...s.settings, lastResyncAt: iso },
       })),
 
+    setLastCanvasAutosaveAt: (iso) =>
+      set((s) => ({
+        settings: { ...s.settings, lastCanvasAutosaveAt: iso },
+      })),
+
     setMarkdownStorageDir: (path) =>
       set((s) => ({
         settings: { ...s.settings, markdownStorageDir: path },
@@ -1275,6 +1339,14 @@ export const useStore = create<State>()(
     setLlmSearchModel: (model) =>
       set((s) => ({ settings: { ...s.settings, llmSearchModel: model } })),
 
+    setEmbeddingsProvider: (provider) =>
+      set((s) => ({
+        settings: {
+          ...s.settings,
+          embeddings: provider === undefined ? undefined : { provider },
+        },
+      })),
+
     setSystemPrompt: (prompt) =>
       set((s) => ({ settings: { ...s.settings, systemPrompt: prompt } })),
 
@@ -1365,11 +1437,26 @@ export const useStore = create<State>()(
     setEditingNode: (id) =>
       set((s) => ({ ui: { ...s.ui, editingNodeId: id } })),
 
-    openAiPalette: (selection, origin, systemContext) =>
+    openAiPalette: (
+      selection,
+      origin,
+      systemContext,
+      sourceNodeIds,
+      contextSummary,
+    ) =>
       set((s) => ({
         ui: {
           ...s.ui,
-          aiPalette: { open: true, selection, origin, systemContext },
+          aiPalette: {
+            open: true,
+            selection,
+            origin,
+            systemContext,
+            ...(sourceNodeIds && sourceNodeIds.length > 0
+              ? { sourceNodeIds }
+              : {}),
+            ...(contextSummary ? { contextSummary } : {}),
+          },
         },
       })),
 

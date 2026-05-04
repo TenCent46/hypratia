@@ -1,3 +1,8 @@
+// Must be the first import — installs a Buffer global so `gray-matter`'s
+// parse path (`Buffer.from(input)` inside `to-file.js`) doesn't throw
+// `ReferenceError: Can't find variable: Buffer` in the WKWebView. Every
+// downstream module that touches `matter()` depends on it.
+import './lib/bufferPolyfill';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';

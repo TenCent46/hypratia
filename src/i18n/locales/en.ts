@@ -112,6 +112,8 @@ const en = {
     selectTool: 'Select Tool',
     handTool: 'Hand Tool',
     cancel: 'Cancel',
+    askWithSelected_one: 'Ask with selected node',
+    askWithSelected_other: 'Ask with {{count}} selected nodes',
     empty: {
       pickProject:
         'Pick a project or conversation in the panel to show its nodes.',

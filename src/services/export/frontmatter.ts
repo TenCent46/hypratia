@@ -3,18 +3,21 @@ import matter from 'gray-matter';
 /**
  * Build a Markdown file with YAML frontmatter.
  *
- * Implementation note — we used to delegate to `matter.stringify` here,
- * but `gray-matter`'s stringify path pulls in `js-yaml`'s binary type
- * branch which references Node's `Buffer` global. WKWebView (Tauri 2 on
- * macOS) doesn't ship that global, so every mirror write threw
+ * Implementation note — we don't use `matter.stringify` because
+ * `gray-matter`'s stringify path pulls in `js-yaml`'s binary-type
+ * branch which references Node's `Buffer` global. WKWebView (Tauri 2
+ * on macOS) doesn't ship that global, so every mirror write threw
  * `ReferenceError: Can't find variable: Buffer` and the entire
  * Knowledge-Base mirror silently produced zero files. The serializer
  * below covers exactly the shapes the mirror actually emits — primitive
  * scalars, string arrays, plain objects (positions, sizes) — without
  * touching `Buffer`.
  *
- * Parsing (`matter(text)`) does not hit the binary branch in practice,
- * so reads keep using `gray-matter`. See `readFrontmatterId` below.
+ * Parsing (`matter(text)`) ALSO touches `Buffer.from` via
+ * `gray-matter/lib/to-file.js`, contrary to an earlier comment that
+ * claimed the parse path was safe. The fix lives at the app entry
+ * points: `src/lib/bufferPolyfill.ts` installs a minimal `Buffer`
+ * shim before any module that imports gray-matter loads.
  */
 export function buildMarkdown(
   frontmatter: Record<string, unknown>,
@@ -75,25 +78,50 @@ function yamlInlineString(s: string): string {
 }
 
 /**
+ * Hypratia-managed entries that live OUTSIDE the `hypratia_*` namespace
+ * because Obsidian (and its plugin ecosystem) reads them by their
+ * unprefixed names — `title` is what Front Matter Title displays in
+ * the file explorer, `aliases` is what the wikilink resolver matches,
+ * `id` is the public-facing identity. Hypratia owns the *values* but
+ * the *keys* belong to the public schema.
+ *
+ *   - `set` keys are overwritten on every sync (Hypratia is the source
+ *     of truth). Pass `undefined` to remove a key.
+ *   - `ensureAliases` entries are MERGED into the existing aliases
+ *     list, preserving user-added aliases. Duplicates are deduped.
+ */
+export type PublicPatch = {
+  set?: Record<string, unknown>;
+  ensureAliases?: string[];
+};
+
+/**
  * Merge a Hypratia-owned frontmatter patch into an existing Markdown file
  * **without** touching user-defined keys. The two-namespace rule:
  *
  *   - Keys prefixed `hypratia_` belong to Hypratia. They get replaced by
  *     the patch (or removed when the patch sets the key to `undefined`).
- *   - Every other key is user-owned (title, tags, aliases, plugin keys,
- *     Properties UI values…). Those pass through verbatim.
+ *   - Every other key is user-owned (tags, plugin keys, Properties UI
+ *     values…). Those pass through verbatim — UNLESS the optional
+ *     `publicPatch` argument explicitly opts them in via `set` or
+ *     `ensureAliases`. The `publicPatch` mechanism exists so Hypratia
+ *     can also manage well-known Obsidian keys (`id`, `title`,
+ *     `aliases`, `hypratiaType`) without giving up the namespace
+ *     safety on everything else.
  *
  * `body` is optional. When `undefined`, the existing body is preserved —
  * which is what most callers want (we are updating provenance metadata,
  * not the prose). Pass an explicit string to replace the body.
  *
- * The patch can carry only `hypratia_*` keys; non-prefixed entries are
- * dropped silently so accidental misuse can't corrupt the user's vault.
+ * The hypratia patch can carry only `hypratia_*` keys; non-prefixed
+ * entries are dropped silently so accidental misuse can't corrupt the
+ * user's vault.
  */
 export function mergeMarkdownWithHypratia(
   existingMarkdown: string,
   hypratiaPatch: Record<string, unknown>,
   body?: string,
+  publicPatch?: PublicPatch,
 ): string {
   const parsed = matter(existingMarkdown ?? '');
   const userData: Record<string, unknown> = { ...parsed.data };
@@ -111,8 +139,51 @@ export function mergeMarkdownWithHypratia(
     }
   }
 
+  // Apply the public patch. `set` overwrites because the value is
+  // Hypratia-derived (e.g. the current node title). `ensureAliases`
+  // merges so the user's own aliases survive a sync.
+  if (publicPatch?.set) {
+    for (const [key, value] of Object.entries(publicPatch.set)) {
+      if (value === undefined) {
+        delete userData[key];
+      } else {
+        userData[key] = value;
+      }
+    }
+  }
+  if (publicPatch?.ensureAliases && publicPatch.ensureAliases.length > 0) {
+    userData.aliases = mergeAliases(userData.aliases, publicPatch.ensureAliases);
+  }
+
   const nextBody = body !== undefined ? body : parsed.content;
   return buildMarkdown(userData, nextBody);
+}
+
+/**
+ * Combine an existing aliases value (string, string[], or absent) with
+ * a list of Hypratia-required entries. Returns a deduped `string[]`,
+ * preserving the original order of user-added entries first.
+ */
+function mergeAliases(
+  existing: unknown,
+  ensure: readonly string[],
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  function push(s: unknown) {
+    if (typeof s !== 'string') return;
+    const trimmed = s.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  if (Array.isArray(existing)) {
+    for (const v of existing) push(v);
+  } else if (typeof existing === 'string') {
+    push(existing);
+  }
+  for (const v of ensure) push(v);
+  return out;
 }
 
 // ---- internal -----------------------------------------------------------

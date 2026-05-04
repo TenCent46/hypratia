@@ -133,6 +133,22 @@ export type CanvasNode = {
   themeId?: ID;
   /** 1 (low) … 5 (high). Drives the importance dot on theme nodes. */
   importance?: 1 | 2 | 3 | 4 | 5;
+  /**
+   * Conflict-detection metadata for Refresh from Vault. Records the
+   * body hash both Hypratia and the vault agreed on at the last
+   * successful sync. Refresh classifies an incoming file by comparing
+   * its body hash against this baseline + the current store body
+   * hash, then applies / skips / reports a conflict accordingly.
+   *
+   * Cleared once on first install (undefined). Set by Force Re-sync
+   * Now and by Refresh from Vault when a `vault-changed-only` apply
+   * succeeds. Untouched by canvas autosave (autosave is geometry-only
+   * and never writes bodies).
+   */
+  syncMeta?: {
+    lastSyncedBodyHash?: string;
+    lastSyncedAt?: string;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -187,6 +203,15 @@ export type ProviderId =
   | 'google'
   | 'ollama'
   | 'openai-compatible';
+
+/**
+ * Embedding provider identifier (plan/v1/31 Step 5). `'off'` disables
+ * embedding-based scoring entirely; the IngestRouter falls back to its
+ * pure-heuristic path. `'mock'` is the deterministic in-process provider
+ * — useful for tests and for proving the seam is wired correctly. Real
+ * providers (e.g. local ONNX MiniLM) extend this union.
+ */
+export type EmbeddingProviderId = 'off' | 'mock';
 
 export type ProviderConfig = {
   id: ProviderId;
@@ -250,6 +275,12 @@ export type Settings = {
   /** ISO timestamp of the last successful "Force re-sync now". UI uses
    *  this to render a "Last synced 3 min ago" indicator. */
   lastResyncAt?: string;
+  /** ISO timestamp of the most recent successful canvas autosave write.
+   *  Surfaced in Settings → Sync Doctor so users can verify autosave is
+   *  alive ("Last canvas autosave: 12s ago") even when nothing visible has
+   *  happened. Distinct from `lastResyncAt` because autosave is per-
+   *  conversation and silent. */
+  lastCanvasAutosaveAt?: string;
   /**
    * Folder where chat history exports as Markdown. Optional — when unset the
    * app falls back to `<appData>/LLM-Conversations`. Set via the "Local
@@ -270,6 +301,14 @@ export type Settings = {
    * to the active chat model.
    */
   llmSearchModel?: ModelRef;
+  /**
+   * Plan/v1/31 Step 5 — embedding provider for chat-ingest similarity
+   * routing. `'off'` (default) keeps the IngestRouter on its pure-heuristic
+   * path so users opt in explicitly. `'mock'` is the deterministic in-process
+   * provider that ships today; it's not semantically accurate but proves
+   * the wiring works. Real providers land in a follow-up plan.
+   */
+  embeddings?: { provider: EmbeddingProviderId };
   systemPrompt?: string;
   dailyNotesFolder?: string;
   dailyNoteTemplate?: string;

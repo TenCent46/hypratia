@@ -24,6 +24,8 @@ export function AIPalette() {
       selection={palette.selection}
       systemContext={palette.systemContext}
       origin={palette.origin}
+      sourceNodeIds={palette.sourceNodeIds}
+      contextSummary={palette.contextSummary}
       onClose={close}
     />
   );
@@ -33,11 +35,32 @@ function AIPaletteInner({
   selection,
   systemContext,
   origin,
+  sourceNodeIds,
+  contextSummary,
   onClose,
 }: {
   selection: string;
   systemContext?: string;
   origin: string | null;
+  /**
+   * Explicit anchors for the auto-link path. When set, the answer node is
+   * placed at the centroid of these nodes' bounding boxes and an edge is
+   * drawn from each one to the answer. Falls back to the single-node
+   * `origin` parsing when undefined or empty (existing single-node Ask
+   * flows are unchanged).
+   */
+  sourceNodeIds?: string[];
+  /**
+   * Real resolved-context summary for the user-message badge. Replaces
+   * the previous `{ fileCount: 0, edgeCount: 0 }` placeholder that
+   * surfaced "0 Markdown files" even when 7 nodes were in fact in the
+   * system prompt.
+   */
+  contextSummary?: {
+    fileCount: number;
+    edgeCount: number;
+    fileNames: string[];
+  };
   onClose: () => void;
 }) {
   const conversationId = useStore((s) => s.settings.lastConversationId);
@@ -144,14 +167,19 @@ function AIPaletteInner({
       'user',
       question,
       undefined,
-      systemContext
+      // The chat-message badge ("Context: N Markdown files, M canvas
+      // links") used to be hardcoded to zeros, lying about non-empty
+      // selections. When the caller resolved the context up front we
+      // surface its real numbers; otherwise fall back to a single-node
+      // 1/0 hint when systemContext is present, else undefined.
+      contextSummary
         ? {
-            // Compact summary so the chat-message context badge can
-            // surface "+ N source files" without exposing the dump.
-            fileCount: 0,
-            edgeCount: 0,
-            fileNames: [],
+            fileCount: contextSummary.fileCount,
+            edgeCount: contextSummary.edgeCount,
+            fileNames: contextSummary.fileNames,
           }
+        : systemContext
+        ? { fileCount: 0, edgeCount: 0, fileNames: [] }
         : undefined,
     );
     try {
@@ -202,9 +230,10 @@ function AIPaletteInner({
     // Auto-link: when the palette was opened from a canvas selection,
     // mint the answer node + edge + selection marker as soon as the
     // stream finishes (and only on success — collected non-empty).
+    const hasMultiSource = !!sourceNodeIds && sourceNodeIds.length > 0;
     if (
       !ctrl.signal.aborted &&
-      canvasOrigin &&
+      (canvasOrigin || hasMultiSource) &&
       collected.trim().length > 0 &&
       conversationId
     ) {
@@ -214,6 +243,7 @@ function AIPaletteInner({
       console.debug('[mc:ask] auto-link skipped', {
         aborted: ctrl.signal.aborted,
         hasCanvasOrigin: !!canvasOrigin,
+        hasMultiSource,
         collectedLength: collected.trim().length,
         conversationId,
       });
@@ -221,14 +251,86 @@ function AIPaletteInner({
   }
 
   function autoLinkAnswerToCanvas(question: string, answer: string) {
-    if (!canvasOrigin || !conversationId) {
-      console.warn('[mc:ask] autoLinkAnswerToCanvas bailed — missing origin or conversation', {
-        hasCanvasOrigin: !!canvasOrigin,
-        conversationId,
-      });
+    if (!conversationId) {
+      console.warn('[mc:ask] autoLinkAnswerToCanvas bailed — missing conversation');
       return;
     }
     const state = useStore.getState();
+    // Multi-source path: explicit sourceNodeIds wins over origin parsing.
+    // Each existing node gets an edge to a single new answer node, placed
+    // to the right of the selection cluster's bounding box.
+    if (sourceNodeIds && sourceNodeIds.length > 0) {
+      const sources = sourceNodeIds
+        .map((id) => state.nodes.find((n) => n.id === id))
+        .filter((n): n is NonNullable<typeof n> => !!n);
+      if (sources.length === 0) {
+        console.warn('[mc:ask] autoLinkAnswerToCanvas bailed — no source nodes found', {
+          requestedIds: sourceNodeIds,
+        });
+        return;
+      }
+      const answerWidth = 320;
+      const answerHeight = 220;
+      // Place to the right of the rightmost selected node, vertically
+      // centered on the cluster's mean Y. Reads as "answer to this group."
+      let maxRight = -Infinity;
+      let sumCenterY = 0;
+      for (const n of sources) {
+        const w = n.width ?? 280;
+        const h = n.height ?? 160;
+        if (n.position.x + w > maxRight) maxRight = n.position.x + w;
+        sumCenterY += n.position.y + h / 2;
+      }
+      const centerY = sumCenterY / sources.length;
+      const placed = {
+        x: maxRight + 80,
+        y: centerY - answerHeight / 2,
+      };
+      console.debug('[mc:ask] creating multi-source answer node', {
+        sourceCount: sources.length,
+        conversationId,
+        answerLength: answer.length,
+      });
+      const answerNode = addNode({
+        conversationId,
+        kind: 'markdown',
+        title: titleFromPrompt(question) || 'AI answer',
+        contentMarkdown: composeAnswerContent(question, answer),
+        position: placed,
+        width: answerWidth,
+        height: answerHeight,
+        tags: ['answer', 'selection-ask'],
+      });
+      const edgeIds: string[] = [];
+      for (const src of sources) {
+        const e = addEdge({
+          sourceNodeId: src.id,
+          targetNodeId: answerNode.id,
+          label: 'AI',
+        });
+        edgeIds.push(e.id);
+      }
+      setCanvasSelection([answerNode.id], edgeIds);
+      flow.setCenter(
+        placed.x + answerWidth / 2,
+        placed.y + answerHeight / 2,
+        { zoom: 1.2, duration: 350 },
+      );
+      onClose();
+      void autoTitleNode({
+        nodeId: answerNode.id,
+        kind: 'answer',
+        context: question,
+      }).catch((err: unknown) =>
+        console.warn('[autoTitleNode] palette failed', err),
+      );
+      return;
+    }
+    // Single-source legacy path (text-selection ask, single-node ask).
+    if (!canvasOrigin) {
+      console.warn('[mc:ask] autoLinkAnswerToCanvas bailed — missing origin');
+      return;
+    }
     const sourceNode = state.nodes.find((n) => n.id === canvasOrigin.nodeId);
     if (!sourceNode) {
       console.warn('[mc:ask] autoLinkAnswerToCanvas bailed — source node not found', {

@@ -1,3 +1,5 @@
+// Must be the first import — see src/lib/bufferPolyfill.ts.
+import '../lib/bufferPolyfill';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 // Landing has its own dark theme + Tailwind utilities. We deliberately do NOT

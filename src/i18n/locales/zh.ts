@@ -104,6 +104,8 @@ const zh: Strings = {
     selectTool: '选择工具',
     handTool: '手形工具',
     cancel: '取消',
+    askWithSelected_one: '基于已选节点提问',
+    askWithSelected_other: '基于 {{count}} 个已选节点提问',
     empty: {
       pickProject: '在面板中选择项目或会话以显示其节点。',
       dragMessage: '将消息拖到这里。',

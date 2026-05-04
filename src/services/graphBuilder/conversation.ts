@@ -1,16 +1,40 @@
-import { llmComplete, parseJsonLoose, runChain } from './modelChain';
+// `.ts` extensions on runtime imports because the test runner uses
+// node's --experimental-strip-types. tsconfig has allowImportingTsExtensions=true.
+import { llmComplete, parseJsonLoose, runChain } from './modelChain.ts';
+import {
+  ASSISTANT_BODY_CAP,
+  assembleStagedGraph,
+  classifyChunkHeuristic,
+  pairTurns,
+  parseTurns,
+  themeRootNode,
+  trimTo,
+} from './conversationAssembly.ts';
 import type {
   ChainTier,
   ConversationClassification,
   ConversationTurn,
   StagedGraph,
-} from './types';
+} from './types.ts';
 import type { ThemeKind } from '../../types';
+import { LLM_FALLBACK_TOPK } from '../ingestRouting/thresholds.ts';
 
-const TURN_MARKER_RE =
-  /^\s*(user|human|me|q|質問|あなた|私)\s*[:>]\s*/i;
-const REPLY_MARKER_RE =
-  /^\s*(assistant|ai|bot|gpt|claude|model|reply|回答)\s*[:>]\s*/i;
+// Re-export the pure helpers + types so callers (and tests) keep their
+// existing import paths working. `RootImportMeta` is the contract the
+// host (`graphBuilder/index.ts`) reads to re-expand collapsed first
+// turns on attach.
+export {
+  ASSISTANT_BODY_CAP,
+  assembleStagedGraph,
+  pairTurns,
+  parseTurns,
+  USER_BODY_CAP,
+} from './conversationAssembly.ts';
+export type {
+  RootImportMeta,
+  TurnPair,
+} from './conversationAssembly.ts';
+void ASSISTANT_BODY_CAP; // keep the runtime symbol in scope (unused locally)
 
 const CHUNK_SIZE = 30;
 
@@ -19,7 +43,7 @@ const SYSTEM_PROMPT = [
   'Reply with JSON only (no fences, no prose). Schema:',
   '[{ "index": number, "themeId": string|null, "isNew": boolean, "themeTitle": string, "askSummary": string, "themeKind": "ask"|"insight"|"decision", "importance": 1|2|3|4|5 }]',
   'Rules:',
-  '- "themeId": when continuing an existing theme this batch already produced, reuse the same string id you returned earlier in this same array. Otherwise return null AND set "isNew" true; the host will mint a fresh id.',
+  '- "themeId": when continuing an existing theme this batch already produced, reuse the same string id you returned earlier in this same array. You may also reuse an id from the "Existing themes" list — that signals continuity with a prior import. Otherwise return null AND set "isNew" true; the host will mint a fresh id.',
   '- "themeTitle": <= 60 chars, sentence-case, descriptive of the theme cluster.',
   '- "askSummary": <= 80 chars, single line, paraphrase of the user turn.',
   '- "themeKind": almost always "ask"; reserve "insight"/"decision" for clear pivots.',
@@ -27,51 +51,10 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 /**
- * Parse turns out of a pasted chat blob. Anything between a user-marker
- * line and the next marker-of-any-kind is taken as that turn's content
- * (multi-line OK). Assistant turns are kept too because the LLM uses
- * their context to assign themes, but only user turns become nodes.
- */
-export function parseTurns(text: string): ConversationTurn[] {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  type Pending = {
-    role: 'user' | 'assistant';
-    bodyLines: string[];
-  };
-  const turns: ConversationTurn[] = [];
-  let cur: Pending | null = null;
-  let idxCounter = 0;
-  function flush() {
-    if (!cur) return;
-    const body = cur.bodyLines.join('\n').trim();
-    if (body) {
-      turns.push({ index: idxCounter++, role: cur.role, content: body });
-    }
-    cur = null;
-  }
-  for (const line of lines) {
-    const userMatch = line.match(TURN_MARKER_RE);
-    const replyMatch = line.match(REPLY_MARKER_RE);
-    if (userMatch) {
-      flush();
-      cur = { role: 'user', bodyLines: [line.slice(userMatch[0].length)] };
-      continue;
-    }
-    if (replyMatch) {
-      flush();
-      cur = { role: 'assistant', bodyLines: [line.slice(replyMatch[0].length)] };
-      continue;
-    }
-    if (cur) cur.bodyLines.push(line);
-  }
-  flush();
-  return turns;
-}
-
-/**
- * One LLM round-trip per chunk of up to `CHUNK_SIZE` user turns. The
- * existing themes from prior chunks are summarised in the prompt so
- * the model can reuse `themeId`s across chunks.
+ * One LLM round-trip per chunk of up to `CHUNK_SIZE` user turns. Existing
+ * themes from prior chunks AND from the active project's canvas are
+ * summarised in the prompt so the model can reuse `themeId`s across
+ * chunks AND across imports (plan/v1/31 Step 3B).
  */
 async function classifyChunkLLM(
   model: { provider: string; model: string },
@@ -81,7 +64,7 @@ async function classifyChunkLLM(
 ): Promise<ConversationClassification[] | null> {
   const userPrompt = [
     priorThemes.length > 0
-      ? `Existing themes from earlier chunks (reuse these ids when appropriate):\n${priorThemes
+      ? `Existing themes (reuse these ids when appropriate):\n${priorThemes
           .map((t) => `- ${t.id} :: ${t.title}`)
           .join('\n')}`
       : 'No prior themes yet.',
@@ -136,46 +119,36 @@ async function classifyChunkLLM(
   return out.length > 0 ? out : null;
 }
 
-function trimTo(s: string, n: number): string {
-  const t = s.replace(/\s+/g, ' ').trim();
-  if (t.length <= n) return t;
-  return `${t.slice(0, Math.max(0, n - 1))}…`;
-}
-
-function classifyChunkHeuristic(
-  userTurns: ConversationTurn[],
-  priorRoot: { id: string; title: string } | null,
-): ConversationClassification[] {
-  const root = priorRoot ?? {
-    id: 'theme:0',
-    title: trimTo(userTurns[0]?.content ?? 'Theme', 60),
-  };
-  return userTurns.map((t) => ({
-    index: t.index,
-    themeId: root.id,
-    isNew: false,
-    themeTitle: root.title,
-    askSummary: trimTo(t.content, 80),
-    themeKind: 'ask' as ThemeKind,
-    importance: 3 as const,
-  }));
-}
+export type BuildConversationGraphOptions = {
+  /**
+   * Plan/v1/31 Step 3B — existing canvas theme roots in the active
+   * project, fed to the LLM classifier so it can return one of these
+   * ids as the theme for a user turn (a cross-import dedup signal).
+   * Capped at {@link LLM_FALLBACK_TOPK} most-recently-updated entries
+   * by the host.
+   */
+  existingThemes?: Array<{ id: string; title: string }>;
+};
 
 /**
- * Build a `StagedGraph` from a parsed conversation. Each unique
- * `themeId` becomes a `theme` root node; each user turn becomes an
- * `ask` child with a `parent` edge from its theme.
+ * Build a `StagedGraph` from a parsed conversation. Plan/v1/31 Step 4:
+ * the first user/assistant exchange of each theme is collapsed into
+ * the theme root; subsequent turns become ask + insight node pairs
+ * connected via `parent` and `related (label=reply)` edges.
+ *
+ * The collapsed first-turn data is stashed on `frontmatter.importMeta`
+ * so `graphBuilder/index.ts` can re-expand it as a separate ask + insight
+ * pair when the root is attached to an existing canvas theme.
  */
 export async function buildConversationGraph(
   text: string,
   chain: ChainTier[],
   signal?: AbortSignal,
+  opts?: BuildConversationGraphOptions,
 ): Promise<StagedGraph> {
   const turns = parseTurns(text);
-  const userTurns = turns.filter((t) => t.role === 'user');
-  if (userTurns.length === 0) {
-    // Fall through to a single-node "no turns parsed" graph rather
-    // than throwing — the user still sees something on the canvas.
+  const pairs = pairTurns(turns);
+  if (pairs.length === 0) {
     return {
       nodes: [
         themeRootNode('Conversation import', trimTo(text, 60), 3),
@@ -184,11 +157,19 @@ export async function buildConversationGraph(
     };
   }
 
+  const userTurns = pairs.map((p) => p.user);
   const allClassifications: ConversationClassification[] = [];
   const themesAcc = new Map<string, { id: string; title: string }>();
+  if (opts?.existingThemes) {
+    const capped = opts.existingThemes.slice(0, LLM_FALLBACK_TOPK);
+    for (const t of capped) themesAcc.set(t.id, t);
+  }
   for (let i = 0; i < userTurns.length; i += CHUNK_SIZE) {
     const chunk = userTurns.slice(i, i + CHUNK_SIZE);
-    const prior = Array.from(themesAcc.values());
+    const prior = Array.from(themesAcc.values()).map((t) => ({
+      id: t.id,
+      title: t.title,
+    }));
     const { value } = await runChain<ConversationClassification[]>(
       chain,
       async (model, sig) => classifyChunkLLM(model, chunk, prior, sig),
@@ -199,7 +180,6 @@ export async function buildConversationGraph(
         ),
       signal,
     );
-    // Mint fresh ids for "isNew" themes, reuse existing ones.
     for (const c of value) {
       if (c.isNew || !c.themeId || !themesAcc.has(c.themeId)) {
         const localId = `theme:${themesAcc.size}`;
@@ -210,57 +190,5 @@ export async function buildConversationGraph(
     allClassifications.push(...value);
   }
 
-  // Build the staged graph.
-  const nodes: StagedGraph['nodes'] = [];
-  const edges: StagedGraph['edges'] = [];
-  const themeIndexById = new Map<string, number>();
-  for (const [id, t] of themesAcc) {
-    themeIndexById.set(id, nodes.length);
-    nodes.push(themeRootNode(t.title, t.title, 3));
-  }
-  for (const c of allClassifications) {
-    if (!c.themeId) continue;
-    const themeIndex = themeIndexById.get(c.themeId);
-    if (themeIndex === undefined) continue;
-    const askIndex = nodes.length;
-    nodes.push(askChildNode(c.askSummary, c.themeKind, c.importance));
-    edges.push({
-      sourceIndex: themeIndex,
-      targetIndex: askIndex,
-      kind: 'parent',
-    });
-  }
-  return { nodes, edges };
-}
-
-function themeRootNode(
-  title: string,
-  summary: string,
-  importance: 1 | 2 | 3 | 4 | 5,
-): StagedGraph['nodes'][number] {
-  return {
-    conversationId: '',
-    kind: 'theme',
-    title: trimTo(title, 60) || 'Theme',
-    contentMarkdown: trimTo(summary, 80) || title,
-    position: { x: 0, y: 0 },
-    tags: ['themeKind:theme', 'imported:conversation'],
-    importance,
-  };
-}
-
-function askChildNode(
-  summary: string,
-  themeKind: ThemeKind,
-  importance: 1 | 2 | 3 | 4 | 5,
-): StagedGraph['nodes'][number] {
-  return {
-    conversationId: '',
-    kind: 'theme',
-    title: trimTo(summary, 60) || '(ask)',
-    contentMarkdown: trimTo(summary, 80) || '(ask)',
-    position: { x: 0, y: 0 },
-    tags: [`themeKind:${themeKind}`, 'imported:conversation'],
-    importance,
-  };
+  return assembleStagedGraph(allClassifications, pairs, themesAcc);
 }

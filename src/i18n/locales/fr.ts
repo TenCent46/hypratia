@@ -106,6 +106,8 @@ const fr: Strings = {
     selectTool: 'Outil sélection',
     handTool: 'Outil main',
     cancel: 'Annuler',
+    askWithSelected_one: 'Demander avec le nœud sélectionné',
+    askWithSelected_other: 'Demander avec {{count}} nœuds sélectionnés',
     empty: {
       pickProject:
         'Choisissez un projet ou une conversation pour afficher ses nœuds.',

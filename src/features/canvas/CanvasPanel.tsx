@@ -1335,8 +1335,11 @@ export function CanvasPanel({
   /**
    * Open the unified AI Palette for the current canvas selection (nodes
    * and/or edges). The selection's resolved Markdown context is passed in
-   * as the palette's selection text; the first selected node is used as the
-   * auto-link anchor so the streamed answer becomes a connected node.
+   * as the palette's selection text; **every** selected node is passed as
+   * an auto-link anchor so the streamed answer is edged from the whole
+   * selected cluster — not just the first node. The single-node `origin`
+   * is still set for backward compatibility with the legacy auto-link
+   * branch, but `sourceNodeIds` takes precedence inside the palette.
    */
   async function openAiPaletteForSelectedCanvas() {
     try {
@@ -1373,7 +1376,17 @@ export function CanvasPanel({
         : 'Selected canvas context';
       useStore
         .getState()
-        .openAiPalette(userVisible, origin, context.systemContext);
+        .openAiPalette(
+          userVisible,
+          origin,
+          context.systemContext,
+          selectedNodeIds.slice(),
+          {
+            fileCount: summary.fileCount,
+            edgeCount: summary.edgeCount,
+            fileNames: summary.fileNames,
+          },
+        );
     } catch (err) {
       console.error('[mc:ask] openAiPaletteForSelectedCanvas failed', err);
     }
@@ -2342,7 +2355,10 @@ export function CanvasPanel({
         onPaneContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (selectedMenuAt(e.clientX, e.clientY)) return;
+          // Always open the canvas-pane menu on empty-space right-click.
+          // It now offers "Ask with selected nodes" when a selection exists,
+          // so we don't need to redirect to the SelectionContextMenu (which
+          // is still reachable via right-click on a selected node or edge).
           setPaneMenu({ x: e.clientX, y: e.clientY });
         }}
         onPaneClick={onPaneClick}
@@ -2550,6 +2566,12 @@ export function CanvasPanel({
           onFitToCanvas={fitToCanvasEdges}
           onSetTool={setCanvasTool}
           onForceResync={() => void runForceResync()}
+          onAskWithSelected={
+            selectedNodeIds.length > 0
+              ? () => void openAiPaletteForSelectedCanvas()
+              : undefined
+          }
+          selectedNodeCount={selectedNodeIds.length}
           onClose={() => setPaneMenu(null)}
         />
       ) : null}

@@ -106,6 +106,8 @@ const es: Strings = {
     selectTool: 'Herramienta selección',
     handTool: 'Herramienta mano',
     cancel: 'Cancelar',
+    askWithSelected_one: 'Preguntar con el nodo seleccionado',
+    askWithSelected_other: 'Preguntar con {{count}} nodos seleccionados',
     empty: {
       pickProject:
         'Elige un proyecto o conversación para mostrar sus nodos.',

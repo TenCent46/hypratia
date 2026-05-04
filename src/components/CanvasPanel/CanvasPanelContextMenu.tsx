@@ -37,6 +37,14 @@ export type CanvasPanelContextMenuProps = {
    * "I want certainty right now" affordance.
    */
   onForceResync?: () => void;
+  /**
+   * "Ask with selected nodes" — only rendered when `hasSelection` is true.
+   * Calls into the same multi-source Ask handler as `SelectionContextMenu`,
+   * so the answer node lands edged from every selected node.
+   */
+  onAskWithSelected?: () => void;
+  /** Number of currently selected nodes — drives the Ask label count. */
+  selectedNodeCount?: number;
   onClose: () => void;
 };
 
@@ -61,6 +69,8 @@ export function CanvasPanelContextMenu({
   onFitToCanvas,
   onSetTool,
   onForceResync,
+  onAskWithSelected,
+  selectedNodeCount = 0,
   onClose,
 }: CanvasPanelContextMenuProps) {
   const { t } = useTranslation();
@@ -102,6 +112,19 @@ export function CanvasPanelContextMenu({
       style={{ left: pos.x, top: pos.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {hasSelection && onAskWithSelected ? (
+        <>
+          <Item
+            onClick={() => {
+              onAskWithSelected();
+              onClose();
+            }}
+            label={t('canvas.askWithSelected', { count: selectedNodeCount })}
+            shortcut="⌘J"
+          />
+          <Separator />
+        </>
+      ) : null}
       <Item
         onClick={() => {
           onAddNode();

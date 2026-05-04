@@ -45,5 +45,10 @@ export async function forceResyncNow(): Promise<ForceResyncResult> {
     },
     syncFn: syncToVault,
     recordLastSync: (iso) => useStore.getState().setLastResyncAt(iso),
+    recordNodeSyncMeta: (nodeId, bodyHash, syncedAt) =>
+      useStore.getState().setNodeSyncMeta(nodeId, {
+        lastSyncedBodyHash: bodyHash,
+        lastSyncedAt: syncedAt,
+      }),
   });
 }

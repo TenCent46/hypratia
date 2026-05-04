@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../../i18n';
 import { useStore } from '../../store';
@@ -16,6 +16,9 @@ import {
   NoVaultConfiguredError,
 } from '../../services/storage/ForceResync';
 import type { SyncSummary } from '../../services/export/VaultSync';
+import { runSyncDoctor } from '../../services/storage/SyncDoctor';
+import type { SyncDoctorReport } from '../../services/storage/syncDoctorCore';
+import { ConflictReviewModal } from '../ConflictReviewModal/ConflictReviewModal';
 import {
   defaultMarkdownStorageDir,
   resolveMarkdownStorageDir,
@@ -1021,6 +1024,7 @@ function VaultTab() {
       <MarkdownEditorSettingsSection />
       <ChatHistoryStorageSection />
       <ObsidianVaultSection />
+      <SyncDoctorSection />
       <RefreshFromVaultSection />
       <LibraryMdBackfillSection />
       <LegacyVaultMigrationSection />
@@ -1490,6 +1494,16 @@ function ObsidianVaultSection() {
       ) : null}
       {error ? <div className="result error">{error}</div> : null}
 
+      <p className="muted" style={{ marginTop: 12, fontSize: 12 }}>
+        Notes are saved as <code>{`{id}.md`}</code> with the readable
+        title in frontmatter (<code>title</code>, <code>aliases</code>)
+        + an H1 heading. This keeps canvas references and multi-device
+        sync stable when you rename a node. For nicer file-explorer
+        labels in Obsidian, install the{' '}
+        <strong>Front Matter Title</strong> community plugin and set
+        the display field to <code>title</code>.
+      </p>
+
       <h3 style={{ marginTop: 24 }}>App data</h3>
       <p className="muted">Where local JSON state and attachments live.</p>
       <div className="path-row">
@@ -1503,6 +1517,135 @@ function ObsidianVaultSection() {
 }
 
 /**
+ * Read-only diagnostics for the Hypratia ↔ vault sync pipeline.
+ * Surfaces the answers users need when something feels off: vault
+ * configured? notes/canvases/sidecars dirs present? autosave alive?
+ * legacy LLM-* leftovers? library backfill pending? Auto-runs once on
+ * mount, then on demand via the Refresh button.
+ */
+function SyncDoctorSection() {
+  const vaultPath = useStore((s) => s.settings.obsidianVaultPath);
+  const lastResyncAt = useStore((s) => s.settings.lastResyncAt);
+  const lastCanvasAutosaveAt = useStore(
+    (s) => s.settings.lastCanvasAutosaveAt,
+  );
+  // `probeReport` holds the filesystem-probed scan; `report` is derived
+  // from it + the live timestamps so "X ago" strings stay fresh
+  // without re-probing the disk on every store tick.
+  const [probeReport, setProbeReport] = useState<SyncDoctorReport | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    setBusy(true);
+    setError(null);
+    try {
+      setProbeReport(await runSyncDoctor());
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Mount-time scan — `cancelled` guard so a fast unmount/remount
+  // doesn't race a setState into a stale tree.
+  useEffect(() => {
+    let cancelled = false;
+    runSyncDoctor()
+      .then((r) => {
+        if (!cancelled) setProbeReport(r);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const report = useMemo(() => {
+    if (!probeReport) return null;
+    return buildReportShape(probeReport, lastResyncAt, lastCanvasAutosaveAt);
+  }, [probeReport, lastResyncAt, lastCanvasAutosaveAt]);
+
+  const overall = report?.overall ?? 'ok';
+  const overallLabel =
+    overall === 'error'
+      ? 'Action needed'
+      : overall === 'warn'
+        ? 'Heads-up'
+        : 'Healthy';
+
+  return (
+    <section className="settings-section">
+      <h3>
+        Sync Doctor{' '}
+        <span
+          className={`sync-doctor-badge sync-doctor-badge--${overall}`}
+          aria-label={`Overall status: ${overallLabel}`}
+        >
+          {overallLabel}
+        </span>
+      </h3>
+      <p className="muted">
+        Read-only diagnostics for the Hypratia ↔ vault pipeline. Nothing
+        here writes or modifies files.
+      </p>
+      <div className="path-row">
+        <code>{vaultPath ?? '(no vault)'}</code>
+        <button type="button" onClick={refresh} disabled={busy}>
+          {busy ? 'Scanning…' : 'Refresh'}
+        </button>
+      </div>
+      {error ? <div className="result error">{error}</div> : null}
+      {report ? (
+        <ul className="sync-doctor-rows">
+          {report.rows.map((row) => (
+            <li key={row.id} className="sync-doctor-row">
+              <span className="sync-doctor-row-label">{row.label}</span>
+              <span
+                className={`sync-doctor-row-value sync-doctor-row-value--${row.severity}`}
+              >
+                {row.value}
+              </span>
+              {row.hint ? (
+                <span className="sync-doctor-row-hint muted">{row.hint}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Recompute the relative-time labels without re-probing the
+ * filesystem. Cheap enough to run on every timestamp change.
+ */
+function buildReportShape(
+  prev: SyncDoctorReport,
+  lastResyncAt: string | undefined,
+  lastCanvasAutosaveAt: string | undefined,
+): SyncDoctorReport {
+  const now = Date.now();
+  const rows = prev.rows.map((row) => {
+    if (row.id === 'time.last-resync') {
+      return { ...row, value: formatLastSync(lastResyncAt, now) };
+    }
+    if (row.id === 'time.last-autosave') {
+      return { ...row, value: formatLastSync(lastCanvasAutosaveAt, now) };
+    }
+    return row;
+  });
+  return { ...prev, rows };
+}
+
+/**
  * Pull markdown body changes from `Hypratia/Notes/` and
  * `Hypratia/Conversations/` back into the in-app store. Identity match is
  * by `hypratia_id` frontmatter — filename renames in Obsidian don't
@@ -1513,6 +1656,7 @@ function RefreshFromVaultSection() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RefreshSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   async function refresh() {
     if (!vaultPath) return;
@@ -1553,18 +1697,38 @@ function RefreshFromVaultSection() {
             {busy ? 'Refreshing…' : 'Refresh from Vault'}
           </button>
           {result ? (
-            <div className="result ok">
-              Scanned {result.scanned} note(s) ·{' '}
-              {result.matched} matched · <strong>{result.updated} updated</strong> ·{' '}
-              {result.skipped} skipped
+            <div
+              className={`result ${result.conflicts > 0 ? 'warn' : 'ok'}`}
+            >
+              Scanned {result.scanned} · matched {result.matched} ·{' '}
+              <strong>{result.updated} updated</strong> ·{' '}
+              {result.skipped} skipped ·{' '}
+              <strong>{result.conflicts} conflict{result.conflicts === 1 ? '' : 's'}</strong>
               {result.unmatched.length > 0
                 ? ` (${result.unmatched.length} unmatched — see console)`
                 : ''}
+              {result.conflicts > 0 ? (
+                <div className="refresh-conflict-actions">
+                  <button
+                    type="button"
+                    onClick={() => setReviewOpen(true)}
+                  >
+                    Review conflicts ({result.conflicts})
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {error ? <div className="result error">{error}</div> : null}
         </>
       )}
+      {reviewOpen && result && vaultPath ? (
+        <ConflictReviewModal
+          vaultPath={vaultPath}
+          details={result.conflictDetails}
+          onClose={() => setReviewOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }

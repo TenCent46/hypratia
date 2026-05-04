@@ -60,10 +60,36 @@ export type JsonCanvas = {
 
 export type SidecarPayload = {
   id: string;
-  /** Vault-relative target path for the sidecar `.md`. */
+  /** Vault-relative target path for the sidecar `.md`.
+   *
+   *  The filename is **always** the stable node id (e.g. `4EJ-LbtesCG0.md`)
+   *  even though the file's frontmatter / H1 carries the human-
+   *  readable title. This is intentional — keeping the on-disk name
+   *  decoupled from the title means:
+   *    - JSON Canvas `file` references never need rewriting when the
+   *      user edits a node title (the spec ties references to paths).
+   *    - Multi-device / iCloud sync never has to reconcile competing
+   *      renames of the same logical note.
+   *    - Title collisions (two notes named "Notes") don't need a
+   *      filename suffix dance.
+   *  The Obsidian-side ergonomics (readable explorer labels, wikilink
+   *  resolution by title) are handled via `aliases` + `title`
+   *  frontmatter and the Front Matter Title plugin — see Settings →
+   *  Vault for the recommendation. */
   relPath: string;
   /** Hypratia frontmatter patch — fed through `mergeMarkdownWithHypratia`. */
   patch: Record<string, unknown>;
+  /**
+   * Hypratia-managed entries that live outside the `hypratia_*`
+   * namespace because Obsidian reads them by their public names
+   * (`id`, `title`, `aliases`, `hypratiaType`). `set` is overwrite-on-
+   * sync; `ensureAliases` is merge-with-existing. Both are applied by
+   * `mergeMarkdownWithHypratia` after the `patch` pass.
+   */
+  publicPatch?: {
+    set?: Record<string, unknown>;
+    ensureAliases?: string[];
+  };
   /** The Markdown body (without frontmatter). */
   body: string;
 };
@@ -121,14 +147,17 @@ export function toJsonCanvas(
         text: titleAndBody(n.title, md),
       });
     } else {
+      // Filename is always `{stable-id}.md` — see SidecarPayload.relPath
+      // for the full rationale. Title goes into frontmatter + H1, never
+      // into the path.
       const fileRel = `${options.notesDir}/${sanitize(n.id)}.md`;
       out.nodes.push({
         ...baseGeom,
         type: 'file',
         file: fileRel,
       });
-      const { patch, body } = buildSidecarPatchAndBody(n);
-      sidecars.push({ id: n.id, relPath: fileRel, patch, body });
+      const { patch, publicPatch, body } = buildSidecarPatchAndBody(n);
+      sidecars.push({ id: n.id, relPath: fileRel, patch, publicPatch, body });
     }
   }
 
@@ -160,8 +189,14 @@ function bodyWithTitle(title: string, content: string): string {
 
 function buildSidecarPatchAndBody(n: CanvasNode): {
   patch: Record<string, unknown>;
+  publicPatch: SidecarPayload['publicPatch'];
   body: string;
 } {
+  // Internal Hypratia-namespace fields. Identity for sync logic
+  // (`hypratia_id`), provenance (`hypratia_conversation`,
+  // `hypratia_created`, `hypratia_updated`), and node typing
+  // (`hypratia_kind`). Match logic in `readFrontmatterIdentity`
+  // depends on `hypratia_id` so it must always be present.
   const patch: Record<string, unknown> = {
     hypratia_id: n.id,
     hypratia_kind: n.kind ?? 'note',
@@ -172,8 +207,27 @@ function buildSidecarPatchAndBody(n: CanvasNode): {
   if (n.tags && n.tags.length > 0) {
     patch.tags = n.tags;
   }
+  // Public-namespace fields. Obsidian reads these by their unprefixed
+  // names: `title` is the Front Matter Title plugin's display source,
+  // `aliases` powers wikilink resolution, `id` is the human-readable
+  // identity. We overwrite `id`/`title`/`hypratiaType` on every sync
+  // (Hypratia is the source of truth for these). Aliases merge with
+  // any user-added entries — the user's own `[[Old Name]]` aliases
+  // survive a Hypratia sync.
+  const title = (n.title ?? '').trim();
+  const publicPatch: SidecarPayload['publicPatch'] = {
+    set: {
+      id: n.id,
+      title: title || undefined,
+      hypratiaType: 'note',
+    },
+    ensureAliases: [
+      ...(title ? [title] : []),
+      `node-${n.id}`,
+    ],
+  };
   const body = bodyWithTitle(n.title, n.contentMarkdown ?? '');
-  return { patch, body };
+  return { patch, publicPatch, body };
 }
 
 export function sanitizeCanvasId(id: string): string {

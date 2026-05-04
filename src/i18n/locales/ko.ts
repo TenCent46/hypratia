@@ -106,6 +106,8 @@ const ko: Strings = {
     selectTool: '선택 도구',
     handTool: '핸드 도구',
     cancel: '취소',
+    askWithSelected_one: '선택한 노드로 질문',
+    askWithSelected_other: '선택한 {{count}}개 노드로 질문',
     empty: {
       pickProject: '패널에서 프로젝트나 대화를 선택하면 노드가 표시됩니다.',
       dragMessage: '메시지를 여기로 드래그하세요.',

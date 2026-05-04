@@ -11,6 +11,13 @@ import {
   type ParsedConversation,
 } from '../../services/capture/PasteCapture';
 import { layoutConversationMap } from '../../services/capture/AutoLayout';
+import {
+  captureActiveProjectId,
+  extractParentCandidateText,
+  planCaptureRouting,
+} from '../../services/capture/captureRouting';
+import { routeParent } from '../../services/ingestRouting/IngestRouter';
+import { showToast } from '../Toast/Toast';
 
 export type CaptureSource = 'paste' | 'chatgpt-export';
 
@@ -56,6 +63,7 @@ export function CapturePreview({
 }) {
   const addNode = useStore((s) => s.addNode);
   const addEdge = useStore((s) => s.addEdge);
+  const updateNode = useStore((s) => s.updateNode);
   const setCanvasSelection = useStore((s) => s.setCanvasSelection);
 
   const parsed: ParsedConversation = useMemo(() => {
@@ -75,6 +83,9 @@ export function CapturePreview({
   // map for explicit user toggles. Deriving `accepted` instead of mirroring
   // it in state means we never need a re-sync effect when `candidates` change.
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  // Guards the now-async applyToCanvas (it awaits routeParent) against
+  // double-clicks while the routing decision is in flight.
+  const [applying, setApplying] = useState(false);
   const accepted = useMemo(() => {
     const set = new Set<string>();
     for (const c of candidates) {
@@ -112,36 +123,114 @@ export function CapturePreview({
     return out;
   }, [candidates]);
 
-  function applyToCanvas() {
+  async function applyToCanvas() {
+    if (applying) return;
+    setApplying(true);
+    try {
+      await applyToCanvasInner();
+    } catch (err) {
+      console.error('[CapturePreview] applyToCanvas failed', err);
+      showToast({
+        message: 'Capture failed — see the console for details.',
+        tone: 'error',
+      });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  async function applyToCanvasInner() {
     const accept = candidates.filter((c) => accepted.has(c.id));
 
     // Root node carries the conversation title + a 1-line gist.
-    const gist = parsed.turns.find((t) => t.role === 'assistant')?.content
-      .split('\n')
-      .map((s) => s.trim())
-      .find((s) => s.length > 0) ?? '';
+    const gist =
+      parsed.turns
+        .find((t) => t.role === 'assistant')
+        ?.content.split('\n')
+        .map((s) => s.trim())
+        .find((s) => s.length > 0) ?? '';
+    const titleClean = titleDraft.trim() || 'Pasted conversation';
+    const bodyMarkdown = `# ${titleClean}\n\n${gist.slice(0, 600)}`;
 
+    // Plan/v1/31 Step 2 — route the import through IngestRouter so a
+    // capture about the same topic as an existing canvas theme attaches
+    // under the existing root instead of minting a duplicate.
+    const state = useStore.getState();
+    const parentText = extractParentCandidateText(parsed);
+    const activeProjectId = captureActiveProjectId(
+      input.conversationId,
+      state.conversations,
+    );
+    const decision = await routeParent({
+      firstTurn: parentText,
+      conversationId: input.conversationId,
+      projectId: activeProjectId,
+      nodes: state.nodes,
+      conversations: state.conversations,
+      activeProjectId,
+    });
+
+    const plan = planCaptureRouting({
+      decision,
+      nodes: state.nodes,
+      fallbackPosition: input.landAt,
+      conversationId: input.conversationId,
+      titleDraft,
+      bodyMarkdown,
+    });
+
+    let rootId: string;
+    let rootCreated = false;
+    // When an attach decision sends children to an existing canvas root
+    // that lives in a different conversation, the children need to land
+    // in the existing root's conversationId — otherwise CanvasPanel's
+    // per-conversation visibility filter drops the edges at render time
+    // and the imported subtree appears disconnected.
+    let childConversationId = input.conversationId;
+    if (plan.kind === 'attach-existing') {
+      rootId = plan.rootNodeId;
+      const existingNode = state.nodes.find((n) => n.id === plan.rootNodeId);
+      if (existingNode) childConversationId = existingNode.conversationId;
+      if (plan.toast) showToast({ message: plan.toast, tone: 'success' });
+      // TODO(plan/v1/31 Step 7) — bundle the auto-attach decision into a
+      // single undo entry so Cmd-Z reverts the merge without deleting
+      // imported children. Today's UndoEntry shape only records
+      // remove-node/remove-edge, so adds aren't tracked at all and Cmd-Z
+      // is a no-op for this import; behaviour is unchanged from before
+      // this PR. Required undo payload:
+      //   { kind: 'capture-attach',
+      //     existingRootId: plan.rootNodeId,
+      //     childNodeIds: [...idMap.values()],
+      //     childEdgeIds: [...] }
+    } else {
+      const created = addNode(plan.rootDraft);
+      // Mirror useChatStream.ts:153 — a freshly-minted theme root carries
+      // its own id as themeId so the cluster machinery (CanvasPanel
+      // theme-cluster walker) can treat it as a parent.
+      updateNode(created.id, { themeId: created.id });
+      rootId = created.id;
+      rootCreated = true;
+      if (plan.toast) showToast({ message: plan.toast, tone: 'info' });
+      // TODO(plan/v1/31 Step 2 follow-up) — surface plan.suggestedNodeId
+      // in a "related topic" UI so the user can promote the suggestion
+      // to a real link. The pointer is already persisted on the new
+      // root's frontmatter (see buildCaptureRootDraft).
+    }
+
+    // Children — keep the existing distillLocal flow for now. Step 4 of
+    // plan/v1/31 replaces this with proper user-prompt / assistant-reply
+    // pairing; this PR only fixes the parent/root routing seam.
     const layout = layoutConversationMap(
-      input.landAt,
+      plan.rootPosition,
       accept.map((c) => ({ id: c.id, kind: c.kind })),
     );
 
-    const root = addNode({
-      conversationId: input.conversationId,
-      kind: 'markdown',
-      title: titleDraft.trim() || 'Pasted conversation',
-      contentMarkdown: `# ${titleDraft.trim() || 'Pasted conversation'}\n\n${gist.slice(0, 600)}`,
-      position: layout.rootPosition,
-      width: 320,
-      height: 180,
-      tags: ['hypratia', 'imported'],
-    });
-
     const idMap = new Map<string, string>();
     for (const c of accept) {
-      const pos = layout.positions[c.id] ?? { x: input.landAt.x, y: input.landAt.y };
+      const pos =
+        layout.positions[c.id] ?? { x: input.landAt.x, y: input.landAt.y };
       const created = addNode({
-        conversationId: input.conversationId,
+        conversationId: childConversationId,
         kind: 'markdown',
         title: c.title,
         contentMarkdown: c.body,
@@ -152,13 +241,15 @@ export function CapturePreview({
       });
       idMap.set(c.id, created.id);
       addEdge({
-        sourceNodeId: root.id,
+        sourceNodeId: rootId,
         targetNodeId: created.id,
         ...(c.kind === 'claim' ? {} : { kind: 'related' as const }),
       });
     }
 
-    const newIds = [root.id, ...idMap.values()];
+    const newIds = rootCreated
+      ? [rootId, ...idMap.values()]
+      : [...idMap.values()];
     setCanvasSelection(newIds, []);
     onClose();
   }
@@ -250,10 +341,16 @@ export function CapturePreview({
         <button
           type="button"
           className="capture-preview-primary"
-          onClick={applyToCanvas}
-          disabled={acceptedCount === 0 && candidates.length > 0}
+          onClick={() => {
+            void applyToCanvas();
+          }}
+          disabled={
+            applying || (acceptedCount === 0 && candidates.length > 0)
+          }
         >
-          Add {acceptedCount > 0 ? `${acceptedCount} ` : ''}to canvas
+          {applying
+            ? 'Adding…'
+            : `Add ${acceptedCount > 0 ? `${acceptedCount} ` : ''}to canvas`}
         </button>
       </footer>
     </aside>

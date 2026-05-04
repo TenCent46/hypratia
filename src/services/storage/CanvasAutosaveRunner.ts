@@ -125,6 +125,10 @@ async function writeCanvasGeometryForConversation(
   await ensureDir(canvasesDir);
   const targetPath = await join(canvasesDir, canvasName);
   await atomicWriteText(targetPath, text);
+
+  // Record liveness AFTER the rename — Sync Doctor uses this to prove
+  // autosave is actually flushing to disk, not just enqueuing.
+  state.setLastCanvasAutosaveAt(new Date().toISOString());
 }
 
 async function ensureDir(p: string): Promise<void> {

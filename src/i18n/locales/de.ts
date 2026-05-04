@@ -106,6 +106,8 @@ const de: Strings = {
     selectTool: 'Auswahl-Werkzeug',
     handTool: 'Hand-Werkzeug',
     cancel: 'Abbrechen',
+    askWithSelected_one: 'Mit ausgewähltem Knoten fragen',
+    askWithSelected_other: 'Mit {{count}} ausgewählten Knoten fragen',
     empty: {
       pickProject:
         'Wähle ein Projekt oder Gespräch im Panel, um seine Knoten zu sehen.',

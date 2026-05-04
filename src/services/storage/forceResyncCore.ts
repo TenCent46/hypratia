@@ -8,6 +8,7 @@
  */
 
 import type { Conversation, CanvasNode, Edge } from '../../types';
+import { hashMarkdownBody } from '../sync/bodyHash.ts';
 
 export class NoVaultConfiguredError extends Error {
   constructor() {
@@ -32,6 +33,18 @@ export type ForceResyncDeps<S> = {
     edges: Edge[];
   }) => Promise<S>;
   recordLastSync: (iso: string) => void;
+  /**
+   * Optional per-node sync-meta recorder. Called once per synced
+   * node AFTER `syncFn` resolves with the node's body hash + the
+   * sync timestamp. Refresh from Vault uses these values as the
+   * baseline for conflict detection on the next pull. Omitting this
+   * dep is supported (older callers without conflict tracking).
+   */
+  recordNodeSyncMeta?: (
+    nodeId: string,
+    bodyHash: string,
+    syncedAt: string,
+  ) => void;
   now?: () => Date;
 };
 
@@ -60,6 +73,20 @@ export async function runForceResync<S>(
   });
   const syncedAt = (deps.now?.() ?? new Date()).toISOString();
   deps.recordLastSync(syncedAt);
+  // Stamp every synced node with its current body hash + the sync
+  // timestamp. This is the baseline Refresh from Vault uses to tell
+  // "vault changed since we last agreed" from "Hypratia changed since
+  // we last agreed" — without it, conflict classification has no
+  // anchor and falls back to the safe-default "conflict."
+  if (deps.recordNodeSyncMeta) {
+    for (const node of snap.nodes) {
+      deps.recordNodeSyncMeta(
+        node.id,
+        hashMarkdownBody(node.contentMarkdown),
+        syncedAt,
+      );
+    }
+  }
   return { syncedAt, summary };
 }
 
